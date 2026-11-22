@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "VipeSpeak Arena",
+    "slug": "vibespeak-arena",
+    "web": {
+      "output": "single"
+    },
+    "experiments": {
+      "reactCompiler": false,
+      "autolinkingModuleResolution": true,
+      "baseUrl": "."
+    }
+  }
+}
