@@ -66,6 +66,7 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [isGrading, setIsGrading] = useState<boolean>(false);
   const [timerSec, setTimerSec] = useState<number>(0);
+  const [liveMicLevel, setLiveMicLevel] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string>('');
 
   const [partResults, setPartResults] = useState<
@@ -75,12 +76,25 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
   const mediaRecorderRef = useRef<any>(null);
   const chunksRef = useRef<any[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const peakVolumeRef = useRef<number>(0);
+  const audioCtxRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     if (!isRecording) return;
     const interval = setInterval(() => setTimerSec((t) => t + 1), 1000);
     return () => clearInterval(interval);
   }, [isRecording]);
+
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((tr) => tr.stop());
+      }
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+      }
+    };
+  }, []);
 
   const handleStartExam = () => {
     if (!studentName.trim() || !studentCode.trim()) {
@@ -97,16 +111,52 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
     setErrorMsg('');
     try {
       chunksRef.current = [];
+      peakVolumeRef.current = 0;
+      setLiveMicLevel(0);
       setTimerSec(0);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
       streamRef.current = stream;
 
-      const recorder = new (window as any).MediaRecorder(stream);
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        if (ctx.state === 'suspended') {
+          await ctx.resume().catch(() => {});
+        }
+        audioCtxRef.current = ctx;
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        const dataArr = new Uint8Array(analyser.frequencyBinCount);
+
+        const monitorMic = () => {
+          if (!streamRef.current) return;
+          analyser.getByteTimeDomainData(dataArr);
+          let currentPeak = 0;
+          for (let i = 0; i < dataArr.length; i++) {
+            const dev = Math.abs(dataArr[i] - 128);
+            if (dev > currentPeak) currentPeak = dev;
+            if (dev > peakVolumeRef.current) peakVolumeRef.current = dev;
+          }
+          setLiveMicLevel(Math.min(100, Math.round((currentPeak / 64) * 100)));
+          requestAnimationFrame(monitorMic);
+        };
+        monitorMic();
+      }
+
+      const mimeType = (window as any).MediaRecorder?.isTypeSupported?.('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+      const recorder = new (window as any).MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
       recorder.ondataavailable = (e: any) => {
         if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
       };
-      recorder.start(150);
+      recorder.start(200);
       setIsRecording(true);
     } catch {
       setErrorMsg('❌ Không thể bật micro. Vui lòng cấp quyền truy cập micro trên trình duyệt.');
@@ -120,6 +170,19 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((tr) => tr.stop());
         streamRef.current = null;
+      }
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
+      setLiveMicLevel(0);
+
+      if (peakVolumeRef.current < 3) {
+        setIsGrading(false);
+        setErrorMsg(
+          '⚠️ Micro không thu được tiếng nói (tín hiệu âm thanh bằng 0). Hãy kiểm tra biểu tượng Micro trên thanh địa chỉ trình duyệt hoặc Cài đặt âm thanh Windows rồi thu lại!'
+        );
+        return;
       }
 
       const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
@@ -141,7 +204,7 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
         const isLocalhost =
           typeof window !== 'undefined' &&
           (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-        const apiBaseUrl = isLocalhost ? 'https://vibe-speak.vercel.app' : '';
+        const apiBaseUrl = isLocalhost ? 'https://vipespeak-arena.vercel.app' : '';
 
         let data: any = null;
         try {
@@ -149,7 +212,6 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
           const rawText = await res.text();
           data = JSON.parse(rawText);
         } catch {
-          // Chế độ dự phòng tự động khi localhost chưa chạy backend Serverless API
           const simScore = Math.min(94, Math.max(68, 72 + Math.min(18, recordedDuration * 2)));
           data = {
             score: simScore,
@@ -203,7 +265,6 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
     const avgWpm = Math.round(results.reduce((sum, r) => sum + (r.wpm || 115), 0) / results.length);
     const cleanCode = studentCode.trim().toUpperCase();
 
-    // Cập nhật hạng CEFR & tốc độ WPM vào bảng profiles nếu sinh viên đã có hồ sơ
     await supabase
       .from('profiles')
       .update({
@@ -213,7 +274,6 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
       })
       .ilike('student_id', cleanCode);
 
-    // Lưu lịch sử bài kiểm tra vào bảng matches (chế độ SOLO) để tra cứu trên Profile
     await supabase.from('matches').insert([
       {
         round_name: `CEFR Official Assessment (${cefrObj.level})`,
@@ -244,7 +304,11 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
       ? Math.round(partResults.reduce((sum, r) => sum + r.score, 0) / partResults.length)
       : 0;
   const finalCefr = mapScoreToCefr(overallAvg);
-  const certVerifyUrl = `https://vibe-speak.vercel.app/?verify_cefr=${encodeURIComponent(
+  const currentOrigin =
+    typeof window !== 'undefined' && window.location?.origin
+      ? window.location.origin
+      : 'https://vipespeak-arena.vercel.app';
+  const certVerifyUrl = `${currentOrigin}/?verify_cefr=${encodeURIComponent(
     studentCode.trim().toUpperCase()
   )}&level=${finalCefr.level}`;
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=130x130&data=${encodeURIComponent(certVerifyUrl)}`;
@@ -333,6 +397,20 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
             ) : (
               <View style={{ alignItems: 'center', gap: 10 }}>
                 <Text style={styles.timerLive}>🔴 ĐANG THU ÂM: {timerSec}s</Text>
+                <View style={styles.micMeterTrack}>
+                  <View
+                    style={[
+                      styles.micMeterFill,
+                      {
+                        width: `${Math.max(4, liveMicLevel)}%`,
+                        backgroundColor: liveMicLevel > 8 ? '#39FF14' : '#FF0055',
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.micMeterHint}>
+                  {liveMicLevel > 8 ? '🎙️ Đang nhận tín hiệu giọng nói tốt' : '⚠️ Chưa thấy tín hiệu micro — hãy nói gần mic hơn'}
+                </Text>
                 <TouchableOpacity style={styles.stopBtn} onPress={stopAndGradePart}>
                   <Text style={styles.stopBtnText}>⏹ HOÀN THÀNH & NỘP PHẦN {currentPart.partNumber}</Text>
                 </TouchableOpacity>
@@ -434,6 +512,9 @@ const styles = StyleSheet.create({
   recordBtn: { backgroundColor: '#FF0055', paddingVertical: 13, borderRadius: 10, alignItems: 'center' },
   recordBtnText: { color: '#FFF', fontSize: 11.5, fontWeight: '900' },
   timerLive: { color: '#FF0055', fontSize: 16, fontWeight: '900' },
+  micMeterTrack: { width: 220, height: 8, backgroundColor: '#1A0B33', borderRadius: 99, overflow: 'hidden' },
+  micMeterFill: { height: '100%', borderRadius: 99 },
+  micMeterHint: { color: '#B0B0CC', fontSize: 10, fontWeight: 'bold' },
   stopBtn: { backgroundColor: '#39FF14', paddingVertical: 13, paddingHorizontal: 22, borderRadius: 10 },
   stopBtnText: { color: '#000', fontSize: 11.5, fontWeight: '900' },
 
