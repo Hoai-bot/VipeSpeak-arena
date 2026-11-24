@@ -81,7 +81,7 @@ const SAMPLE_MOTIONS_BY_LEVEL: Record<string, { motion_en: string; context_vi: s
   ],
   C2: [
     {
-      motion_en: 'Universal Basic Income is an ethical necessity in an automated post-scarcity economy.',
+      motion_en: 'Universal Basic Income is an ethical necessity in an automated post-scity economy.',
       context_vi: 'Lập luận chuyên sâu về thu nhập cơ bản phổ quát trong nền kinh tế tự động hóa.',
       context_en: 'Argue the ethical and economic viability of Universal Basic Income in an automated society.',
     },
@@ -370,6 +370,22 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
     };
   };
 
+  // Tự động cập nhật Đỉnh năng lực & Huy hiệu SPEAK-ID vào bảng profiles
+  const syncSpeakIdBadgeToProfile = async (finalScoreVal: number) => {
+    if (!supabase || !matchRecord?.player1_code) return;
+    const earnedBadge =
+      finalScoreVal >= 85
+        ? `IPA Master • ${matchRecord.cefr_level || selectedCefr}`
+        : tournament.mode === 'DEBATE'
+        ? `Debate Challenger • ${matchRecord.cefr_level || selectedCefr}`
+        : `Arena Competitor • ${matchRecord.cefr_level || selectedCefr}`;
+
+    await supabase
+      .from('profiles')
+      .update({ badge_title: earnedBadge })
+      .ilike('student_id', matchRecord.player1_code);
+  };
+
   const gradeAndSyncTurn = async (audioBlob: Blob) => {
     if (!supabase || !matchRecord) return;
 
@@ -453,6 +469,7 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
         const p2Scores = ['R1_P2', 'R2_P2', 'R3_P2'].map((k) => Number(updatedRounds[k]?.score || 0));
         const avgP1 = Math.round(p1Scores.reduce((a, b) => a + b, 0) / 3);
         const avgP2 = Math.round(p2Scores.reduce((a, b) => a + b, 0) / 3);
+        const debateFinal = Math.max(avgP1, avgP2);
         const winner = avgP1 >= avgP2 ? matchRecord.player1_code : matchRecord.player2_code;
 
         const { data: finalMatch } = await supabase
@@ -463,7 +480,7 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
             player2_score: avgP2,
             rebuttal_score_p1: updatedRounds.R2_P1?.score || 0,
             rebuttal_score_p2: updatedRounds.R2_P2?.score || 0,
-            final_score: Math.max(avgP1, avgP2),
+            final_score: debateFinal,
             winner_code: winner,
             ai_feedback: { vi: turnFeedback, en: turnFeedback },
             live_status: 'FINISHED',
@@ -473,6 +490,7 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
           .single();
 
         if (finalMatch) setMatchRecord(finalMatch);
+        await syncSpeakIdBadgeToProfile(avgP1);
         setPhase('RESULT');
         return;
       }
@@ -522,6 +540,7 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
         .single();
 
       if (doneMatch) setMatchRecord(doneMatch);
+      await syncSpeakIdBadgeToProfile(overallFinal);
       setPhase('RESULT');
     } catch (err: any) {
       setStatusMsg(`❌ Lỗi chấm điểm AI: ${err.message}`);

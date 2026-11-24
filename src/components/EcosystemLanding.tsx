@@ -25,6 +25,7 @@ export interface PassportHistoryRecord {
   transcript: string;
   feedback: string;
   audio_url?: string | null;
+  is_var_verified?: boolean;
   created_at: string;
   source: 'ARENA_MATCH' | 'CEFR_SUBMISSION';
 }
@@ -36,6 +37,14 @@ export interface EcosystemLandingProps {
   onNavigateHub: () => void;
   onNavigateCefrTest: () => void;
   onNavigateProfile: (studentCode?: string) => void;
+}
+
+function getCefrFloorLabel(peakScore: number, isVi: boolean): string {
+  if (peakScore >= 92) return isVi ? 'C2 • Khóa sàn C1+' : 'C2 • Floor C1+';
+  if (peakScore >= 82) return isVi ? 'C1 • Khóa sàn B2+' : 'C1 • Floor B2+';
+  if (peakScore >= 70) return isVi ? 'B2 • Khóa sàn B1+' : 'B2 • Floor B1+';
+  if (peakScore >= 56) return isVi ? 'B1 • Khóa sàn A2+' : 'B1 • Floor A2+';
+  return isVi ? 'A2 • Đang tích lũy' : 'A2 • Building';
 }
 
 const DEMO_RECORDS: PassportHistoryRecord[] = [
@@ -51,6 +60,7 @@ const DEMO_RECORDS: PassportHistoryRecord[] = [
     feedback:
       '[Phát âm: 91 | Ngữ điệu: 84 | Ngữ pháp: 95 | Nội dung: 94] 🌟 Xuất sắc! Diễn đạt tự nhiên, phân biệt chuẩn "used to" và hiện tại đơn.',
     audio_url: null,
+    is_var_verified: true,
     created_at: '2026-11-23T09:24:38.636Z',
     source: 'ARENA_MATCH',
   },
@@ -66,6 +76,7 @@ const DEMO_RECORDS: PassportHistoryRecord[] = [
     feedback:
       '[Phát âm: 88 | Ngữ điệu: 84 | Ngữ pháp: 87 | Nội dung: 90] 🚀 Tranh biện sắc bén, dùng từ nối tương phản học thuật chuẩn xác.',
     audio_url: null,
+    is_var_verified: false,
     created_at: '2026-11-22T14:15:10.000Z',
     source: 'ARENA_MATCH',
   },
@@ -179,7 +190,6 @@ export default function EcosystemLanding({
 
       const mergedResults: PassportHistoryRecord[] = [];
 
-      // 1. Truy vấn lịch sử trận đấu trong bảng matches (SOLO / RELAY / ROLEPLAY / DEBATE)
       const { data: matchRows } = await supabase
         .from('matches')
         .select('*')
@@ -202,13 +212,13 @@ export default function EcosystemLanding({
             transcript: m.prompt_data?.motion_en || 'Arena Official Match',
             feedback: m.ai_feedback?.vi || m.ai_feedback?.en || 'Đã hoàn thành lượt thi đấu trên sàn Arena.',
             audio_url: isP2 ? m.player2_audio_url : m.player1_audio_url,
+            is_var_verified: m.live_status === 'VAR_VERIFIED',
             created_at: m.created_at,
             source: 'ARENA_MATCH',
           });
         });
       }
 
-      // 2. Truy vấn thêm các bài kiểm định CEFR / luyện tập trong bảng submissions
       const { data: subRows } = await supabase
         .from('submissions')
         .select('id, student_name, student_code, mode, cefr_level, score, manual_score, transcript, feedback, audio_url, created_at')
@@ -228,6 +238,7 @@ export default function EcosystemLanding({
             transcript: s.transcript || '',
             feedback: s.feedback || '',
             audio_url: s.audio_url || null,
+            is_var_verified: typeof s.manual_score === 'number',
             created_at: s.created_at,
             source: 'CEFR_SUBMISSION',
           });
@@ -271,6 +282,10 @@ export default function EcosystemLanding({
     primaryStudent?.student_code && primaryStudent.student_code !== 'GUEST'
       ? `SPEAK-${primaryStudent.student_code.toUpperCase()}`
       : 'SPEAK-GUEST-2026';
+
+  const hasVarVerified = records.some((r) => r.is_var_verified);
+  const hasDebatePlayed = records.some((r) => r.mode.includes('DEBATE'));
+  const hasIpaMaster = peakScore >= 80;
 
   const formatModeLabel = (m: string) => {
     if (m.includes('DEBATE')) return '⚖️ DEBATE';
@@ -354,7 +369,7 @@ export default function EcosystemLanding({
       <View style={styles.heroSection}>
         <View style={styles.heroBadge}>
           <Text style={styles.heroBadgeText}>
-            🔬 GEMINI IPA PHONETICS  •  🛡️ ANTI-CHEAT & PARROTING GUARD  •  🎥 LIVE ARENA
+            🔬 GEMINI IPA PHONETICS  •  🔒 CEFR FLOOR LOCK  •  🛡️ TEACHER AUDIO VAR
           </Text>
         </View>
 
@@ -366,8 +381,8 @@ export default function EcosystemLanding({
 
         <Text style={styles.heroSubtitle}>
           {isVi
-            ? 'Hệ sinh thái luyện tập và thi đấu nói tiếng Anh toàn diện: tích hợp AI kiểm định âm vị IPA chuẩn Cambridge, giám sát chống chuyển tab và lưu vết âm thanh trực tiếp trên Hộ chiếu SPEAK-ID.'
-            : 'Complete English speaking competition and assessment ecosystem with Cambridge IPA phonetic audit, anti-cheat protection, and audio logs synced to SPEAK-ID.'}
+            ? 'Hệ sinh thái luyện tập và thi đấu nói tiếng Anh toàn diện: tích hợp AI kiểm định âm vị IPA chuẩn Cambridge, khóa sàn năng lực chống tụt hạng ảo và Phòng Thẩm Định Audio VAR lưu vết trên Hộ chiếu SPEAK-ID.'
+            : 'Complete English speaking competition and assessment ecosystem with Cambridge IPA phonetic audit, CEFR floor lock protection, and Teacher Audio VAR synced to SPEAK-ID.'}
         </Text>
 
         <View style={styles.heroCtaRow}>
@@ -385,7 +400,7 @@ export default function EcosystemLanding({
         </View>
       </View>
 
-      {/* 3. KHU VỰC 4 THỂ THỨC THI ĐẤU CỐT LÕI (SOLO • RELAY • ROLEPLAY • DEBATE) */}
+      {/* 3. KHU VỰC 4 THỂ THỨC THI ĐẤU CỐT LÕI */}
       <View style={styles.sectionWrapper}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionEyebrow}>
@@ -438,18 +453,18 @@ export default function EcosystemLanding({
         </View>
       </View>
 
-      {/* 4. KHUNG TRA CỨU HỘ CHIẾU NĂNG LỰC SPEAK-ID */}
+      {/* 4. KHUNG TRA CỨU HỘ CHIẾU NĂNG LỰC SPEAK-ID + KHÓA SÀN CEFR + HUY HIỆU */}
       <View style={styles.sectionWrapper}>
         <View style={styles.passportContainer}>
           <View style={styles.passportHeaderRow}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.sectionEyebrow, { color: '#38BDF8' }]}>
-                🪪 {isVi ? 'HỒ SƠ NĂNG LỰC SỐ HÓA • SUPABASE LIVE SYNC' : 'DIGITAL SPEAKING PASSPORT • SUPABASE LIVE'}
+                🪪 {isVi ? 'HỒ SƠ NĂNG LỰC SỐ HÓA • KHÓA SÀN CEFR FLOOR LOCK' : 'DIGITAL PASSPORT • CEFR FLOOR LOCK'}
               </Text>
               <Text style={styles.passportTitle}>
                 {isVi
-                  ? 'Tra Cứu Hộ Chiếu SPEAK-ID, Điểm CEFR & Bản Thu Âm'
-                  : 'Lookup SPEAK-ID Passport, CEFR Score & Audio Replay'}
+                  ? 'Tra Cứu Hộ Chiếu SPEAK-ID, Khóa Sàn CEFR & Audio Replay'
+                  : 'Lookup SPEAK-ID Passport, CEFR Floor & Audio Replay'}
               </Text>
             </View>
 
@@ -506,7 +521,7 @@ export default function EcosystemLanding({
                   <Text style={styles.speakIdText}>{speakIdCode}</Text>
                   <Text style={styles.studentNameText}>{primaryStudent.student_name}</Text>
                   <Text style={styles.cefrTargetText}>
-                    {isVi ? 'Cấp độ CEFR:' : 'Target CEFR:'}{' '}
+                    {isVi ? 'Cấp độ hiện tại:' : 'Current CEFR:'}{' '}
                     <Text style={{ color: '#38BDF8', fontWeight: '800' }}>
                       {primaryStudent.cefr_level || 'B1'}
                     </Text>
@@ -521,19 +536,19 @@ export default function EcosystemLanding({
                     {latestScore} / 100
                   </Text>
                   <Text style={styles.metricSub}>
-                    {isVi ? '🤖 AI & IPA Chấm tự động' : '🤖 AI & IPA Graded'}
+                    {isVi ? `Trung bình tích lũy: ${avgScore}đ` : `Cumulative Avg: ${avgScore} pts`}
                   </Text>
                 </View>
 
                 <View style={styles.metricBox}>
                   <Text style={styles.metricLabel}>
-                    {isVi ? 'ĐỈNH NĂNG LỰC (PEAK)' : 'PEAK CEFR SCORE'}
+                    {isVi ? 'KHÓA SÀN NĂNG LỰC (PEAK)' : 'PEAK CEFR FLOOR'}
                   </Text>
                   <Text style={[styles.metricValue, { color: '#38BDF8' }]}>
                     {peakScore} / 100
                   </Text>
-                  <Text style={styles.metricSub}>
-                    {isVi ? `Trung bình tích lũy: ${avgScore}đ` : `Cumulative Avg: ${avgScore} pts`}
+                  <Text style={[styles.metricSub, { color: '#7DD3FC', fontWeight: '700' }]}>
+                    🔒 {getCefrFloorLabel(peakScore, isVi)}
                   </Text>
                 </View>
 
@@ -546,9 +561,48 @@ export default function EcosystemLanding({
                   </Text>
                   <TouchableOpacity onPress={() => onNavigateProfile(primaryStudent.student_code)}>
                     <Text style={[styles.metricSub, { color: '#34D399', fontWeight: '700' }]}>
-                      {isVi ? 'Xem đầy đủ hồ sơ ➔' : 'Open full profile ➔'}
+                      {isVi ? 'Xem hồ sơ & ELO đầy đủ ➔' : 'Open full profile & ELO ➔'}
                     </Text>
                   </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Thanh Huy Hiệu Kỹ Năng Mở Khóa Tự Động */}
+              <View style={styles.skillBadgesBar}>
+                <View style={[styles.badgeChip, hasIpaMaster && styles.badgeChipUnlocked]}>
+                  <Text style={styles.badgeChipText}>
+                    {hasIpaMaster
+                      ? isVi
+                        ? '✅ Chuẩn Âm Vị IPA (≥80đ)'
+                        : '✅ IPA Phonetics Master'
+                      : isVi
+                      ? '🔒 Chuẩn Âm Vị IPA (Đạt ≥80đ)'
+                      : '🔒 IPA Phonetics (≥80 pts)'}
+                  </Text>
+                </View>
+
+                <View style={[styles.badgeChip, hasDebatePlayed && styles.badgeChipUnlocked]}>
+                  <Text style={styles.badgeChipText}>
+                    {hasDebatePlayed
+                      ? isVi
+                        ? '✅ Nhà Tranh Biện Debate'
+                        : '✅ Debate Competitor'
+                      : isVi
+                      ? '🔒 Nhà Tranh Biện Debate'
+                      : '🔒 Debate Competitor'}
+                  </Text>
+                </View>
+
+                <View style={[styles.badgeChip, hasVarVerified && styles.badgeChipUnlocked]}>
+                  <Text style={styles.badgeChipText}>
+                    {hasVarVerified
+                      ? isVi
+                        ? '🛡️ Giảng Viên Đã Thẩm Định VAR'
+                        : '🛡️ Teacher VAR Verified'
+                      : isVi
+                      ? '⏳ Chờ Thẩm Định Audio VAR'
+                      : '⏳ Pending Audio VAR'}
+                  </Text>
                 </View>
               </View>
 
@@ -573,6 +627,9 @@ export default function EcosystemLanding({
                               {rec.score}đ
                             </Text>
                           </View>
+                          {rec.is_var_verified && (
+                            <Text style={styles.varVerifiedMini}>🛡️ VAR</Text>
+                          )}
                         </View>
                         <Text style={styles.historyTranscript} numberOfLines={2}>
                           "{rec.transcript}"
@@ -638,26 +695,26 @@ export default function EcosystemLanding({
             </View>
 
             <View style={styles.pillarCard}>
-              <Text style={styles.pillarIcon}>🛡️</Text>
+              <Text style={styles.pillarIcon}>🔒</Text>
               <Text style={styles.pillarTitle}>
-                {isVi ? '2. Chống Chuyển Tab & Lặp Đề' : '2. Anti-Cheat & Parroting'}
+                {isVi ? '2. Khóa Sàn CEFR & Chống Lặp Đề' : '2. CEFR Floor Lock & Anti-Cheat'}
               </Text>
               <Text style={styles.pillarDesc}>
                 {isVi
-                  ? 'Khóa đề bài đếm ngược 15 giây chuẩn bị, giám sát chuyển tab tự động và loại trừ phần đọc lặp lại câu hỏi đề bài (Net Original Words).'
-                  : '15s prep lock, automatic tab-switch guard, and prompt-parroting subtraction for authentic evaluation.'}
+                  ? 'Bảo vệ đỉnh năng lực CEFR thực chất của sinh viên, khóa đề bài đếm ngược 15 giây, chống chuyển tab và loại trừ đọc lặp câu hỏi.'
+                  : 'Protects verified peak CEFR floor, enforces 15s prep lock, tab-switch guard, and prompt-parroting subtraction.'}
               </Text>
             </View>
 
             <View style={styles.pillarCard}>
               <Text style={styles.pillarIcon}>🎥</Text>
               <Text style={styles.pillarTitle}>
-                {isVi ? '3. Livestream & Audio Replay' : '3. Live Arena & Replay'}
+                {isVi ? '3. Phòng Audio VAR Giảng Viên' : '3. Teacher Audio VAR Lab'}
               </Text>
               <Text style={styles.pillarDesc}>
                 {isVi
-                  ? 'Phát trực tiếp diễn biến từng lượt nói cho khán giả theo dõi và lưu vết file âm thanh lên Hộ chiếu SPEAK-ID để thẩm định minh bạch.'
-                  : 'Stream live match turns for spectators and log original audio files onto SPEAK-ID for transparent review.'}
+                  ? 'Phát trực tiếp diễn biến lượt nói và cho phép giảng viên nghe lại audio gốc, chốt phán quyết VAR đồng bộ lên Hộ chiếu SPEAK-ID.'
+                  : 'Stream live match turns and enable instructors to replay original audio and lock VAR verdicts onto SPEAK-ID.'}
               </Text>
             </View>
 
@@ -928,6 +985,27 @@ const styles = StyleSheet.create({
   metricLabel: { color: '#94A3B8', fontSize: 10, fontWeight: '700' },
   metricValue: { color: '#FFFFFF', fontSize: 22, fontWeight: '900', marginTop: 4 },
   metricSub: { color: '#94A3B8', fontSize: 11, marginTop: 4 },
+
+  skillBadgesBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  badgeChip: {
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+  },
+  badgeChipUnlocked: {
+    backgroundColor: 'rgba(16,185,129,0.14)',
+    borderColor: 'rgba(16,185,129,0.45)',
+  },
+  badgeChipText: { color: '#E2E8F0', fontSize: 11, fontWeight: '700' },
+
   historyHeading: { color: '#CBD5E1', fontSize: 12, fontWeight: '800', marginTop: 20, marginBottom: 10 },
   historyList: { gap: 10 },
   historyRow: {
@@ -954,6 +1032,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.04)',
   },
   scorePillText: { fontSize: 11, fontWeight: '900' },
+  varVerifiedMini: {
+    backgroundColor: 'rgba(56,189,248,0.16)',
+    color: '#7DD3FC',
+    fontSize: 10,
+    fontWeight: '800',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
+  },
   historyTranscript: { color: '#E2E8F0', fontSize: 12, fontStyle: 'italic', marginTop: 6 },
   historyFeedback: { color: '#6EE7B7', fontSize: 11, marginTop: 4 },
   historyRight: { alignItems: 'flex-end' },
