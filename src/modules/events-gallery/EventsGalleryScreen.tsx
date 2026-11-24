@@ -13,9 +13,6 @@ import {
 import { supabase } from '../../utils/supabase';
 import { TournamentItem } from '../tournament-core/ArenaHubScreen';
 
-// 🔐 MÃ PIN KIỂM DUYỆT DÀNH CHO GIẢNG VIÊN / BAN TỔ CHỨC
-const MODERATOR_PASSCODE = 'VIPESPEAK2026';
-
 export interface ArenaPhotoItem {
   id: string;
   storagePath?: string;
@@ -73,6 +70,29 @@ const INITIAL_DEMO_PHOTOS: ArenaPhotoItem[] = [
   },
 ];
 
+// Chuyển tiếng Việt có dấu sang không dấu và loại bỏ ký tự đặc biệt để hợp lệ với Supabase Storage key
+function toSafeStorageSlug(input: string, maxLen = 40): string {
+  return (
+    input
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .replace(/[^a-zA-Z0-9-]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, maxLen) || 'item'
+  );
+}
+
+function safeDecodeLabel(raw: string, fallback: string): string {
+  if (!raw) return fallback;
+  try {
+    return decodeURIComponent(raw).replace(/_/g, ' ').trim() || fallback;
+  } catch {
+    return raw.replace(/_/g, ' ').trim() || fallback;
+  }
+}
+
 function compressImageFileToBlob(file: File, maxWidth = 1080, quality = 0.82): Promise<{ blob: Blob; dataUrl: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -118,10 +138,11 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'LIVE' | 'UPCOMING' | 'ENDED'>('ALL');
   const [modeFilter, setModeFilter] = useState<'ALL' | 'SOLO' | 'RELAY' | 'ROLEPLAY' | 'DEBATE'>('ALL');
 
-  // Panel Đăng Sự Kiện & Kiểm Duyệt
+  // Panel Đăng Sự Kiện & Kiểm Duyệt (Xác thực PIN qua server /api/verify-moderator)
   const [showStudioPanel, setShowStudioPanel] = useState<boolean>(false);
   const [modPinInput, setModPinInput] = useState<string>('');
-  const isModeratorUnlocked = modPinInput.trim().toUpperCase() === MODERATOR_PASSCODE;
+  const [isModeratorUnlocked, setIsModeratorUnlocked] = useState<boolean>(false);
+  const [isVerifyingPin, setIsVerifyingPin] = useState<boolean>(false);
 
   // Cột 1: Tạo Sự Kiện + Poster (Giáo viên / BTC)
   const [eventTitleInput, setEventTitleInput] = useState<string>('');
@@ -150,13 +171,17 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
     loadEventsAndPhotos();
   }, []);
 
-  const parseStoragePhoto = (fileObj: any, folder: 'gallery/approved' | 'gallery/pending', status: 'APPROVED' | 'PENDING'): ArenaPhotoItem => {
+  const parseStoragePhoto = (
+    fileObj: any,
+    folder: 'gallery/approved' | 'gallery/pending',
+    status: 'APPROVED' | 'PENDING'
+  ): ArenaPhotoItem => {
     const fullPath = `${folder}/${fileObj.name}`;
     const { data: urlObj } = supabase!.storage.from('submissions').getPublicUrl(fullPath);
     const parts = fileObj.name.replace(/\.[^/.]+$/, '').split('__');
-    const code = parts[1] || 'SPEAK-ID';
-    const name = decodeURIComponent(parts[2] || 'Thí sinh Arena');
-    const cap = decodeURIComponent(parts[3] || 'Khoảnh khắc thi đấu VipeSpeak Arena');
+    const code = safeDecodeLabel(parts[1] || '', 'SPEAK-ID');
+    const name = safeDecodeLabel(parts[2] || '', 'Thí sinh Arena');
+    const cap = safeDecodeLabel(parts[3] || '', 'Khoảnh khắc thi đấu VipeSpeak Arena');
     return {
       id: fileObj.id || fullPath,
       storagePath: fullPath,
@@ -216,6 +241,34 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
     }
   };
 
+  const handleVerifyModeratorPin = async () => {
+    if (!modPinInput.trim()) {
+      setStudioNotice('⚠️ Vui lòng nhập mã PIN Giảng viên / BTC.');
+      return;
+    }
+    setIsVerifyingPin(true);
+    try {
+      const res = await fetch('/api/verify-moderator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: modPinInput.trim() }),
+      });
+      const data = await res.json();
+      if (data?.success) {
+        setIsModeratorUnlocked(true);
+        setModPinInput('');
+        setStudioNotice('🛡️ Đã xác thực thành công quyền Giảng viên / Ban Tổ Chức!');
+      } else {
+        setIsModeratorUnlocked(false);
+        setStudioNotice(`❌ ${data?.message || 'Sai mã PIN kiểm duyệt.'}`);
+      }
+    } catch {
+      setStudioNotice('❌ Không thể kết nối máy chủ xác thực PIN.');
+    } finally {
+      setIsVerifyingPin(false);
+    }
+  };
+
   const handlePosterPicked = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
     try {
@@ -230,7 +283,7 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
 
   const handlePublishEventWithPoster = async () => {
     if (!isModeratorUnlocked) {
-      setStudioNotice('🔒 Vui lòng nhập đúng Mã PIN Giảng viên / BTC để đăng sự kiện chính thức!');
+      setStudioNotice('🔒 Vui lòng xác thực Mã PIN Giảng viên / BTC để đăng sự kiện chính thức!');
       return;
     }
     if (!eventTitleInput.trim()) {
@@ -306,7 +359,6 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
       return;
     }
 
-    // Chống spam: tối đa 3 ảnh mỗi lần tải lên
     if (fileList.length > 3) {
       setStudioNotice('⚠️ Để tránh quá tải, mỗi lần chỉ được tải lên tối đa 3 ảnh.');
       return;
@@ -334,9 +386,10 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
         let storagePath = '';
 
         if (supabase) {
-          const safeName = encodeURIComponent(cleanName).slice(0, 40);
-          const safeCap = encodeURIComponent(cleanCaption).slice(0, 60);
-          storagePath = `${targetFolder}/${Date.now()}_${i}__${cleanCode}__${safeName}__${safeCap}.jpg`;
+          const safeCode = toSafeStorageSlug(cleanCode, 20);
+          const safeName = toSafeStorageSlug(cleanName, 36);
+          const safeCap = toSafeStorageSlug(cleanCaption, 50);
+          storagePath = `${targetFolder}/${Date.now()}_${i}__${safeCode}__${safeName}__${safeCap}.jpg`;
 
           const { data: upRes } = await supabase.storage.from('submissions').upload(storagePath, blob, {
             contentType: 'image/jpeg',
@@ -380,12 +433,16 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
     }
   };
 
-  // Giảng viên / BTC duyệt ảnh từ gallery/pending sang gallery/approved
+  // Giảng viên / BTC duyệt ảnh từ gallery/pending sang gallery/approved (làm sạch tên tệp chứa %)
   const handleApprovePhoto = async (photo: ArenaPhotoItem) => {
     if (!supabase || !photo.storagePath) return;
     setModeratingPath(photo.storagePath);
     try {
-      const newPath = photo.storagePath.replace('gallery/pending/', 'gallery/approved/');
+      const safeCode = toSafeStorageSlug(photo.studentCode, 20);
+      const safeName = toSafeStorageSlug(photo.uploaderName, 36);
+      const safeCap = toSafeStorageSlug(photo.caption, 50);
+      const newPath = `gallery/approved/${Date.now()}__${safeCode}__${safeName}__${safeCap}.jpg`;
+
       const { error } = await supabase.storage.from('submissions').move(photo.storagePath, newPath);
       if (error) throw error;
 
@@ -417,7 +474,7 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
 
       setPendingPhotos((prev) => prev.filter((p) => p.storagePath !== photo.storagePath));
       setApprovedPhotos((prev) => prev.filter((p) => p.storagePath !== photo.storagePath));
-      setStudioNotice(`🗑️ Đã xóa ảnh khỏi hệ thống!`);
+      setStudioNotice('🗑️ Đã xóa ảnh khỏi hệ thống!');
     } catch (err: any) {
       setStudioNotice(`❌ Lỗi xóa ảnh: ${err?.message || 'Thử lại'}`);
     } finally {
@@ -432,7 +489,6 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
     return true;
   });
 
-  // Ảnh hiển thị công khai + ảnh đang chờ duyệt của chính thí sinh đang nhập MSSV
   const myPendingPhotos = uploaderCode.trim()
     ? pendingPhotos.filter((p) => p.studentCode === uploaderCode.trim().toUpperCase())
     : [];
@@ -475,14 +531,38 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
                       : 'Ảnh thí sinh tải lên sẽ qua bước kiểm duyệt của Giáo viên/BTC trước khi hiển thị công khai.'}
                   </Text>
                 </View>
-                <TextInput
-                  style={styles.modPinInput}
-                  secureTextEntry
-                  placeholder="Nhập mã PIN Giáo viên / BTC..."
-                  placeholderTextColor="#64748B"
-                  value={modPinInput}
-                  onChangeText={setModPinInput}
-                />
+
+                {isModeratorUnlocked ? (
+                  <TouchableOpacity
+                    style={styles.modLockBtn}
+                    onPress={() => setIsModeratorUnlocked(false)}
+                  >
+                    <Text style={styles.modLockBtnText}>🔒 Khóa quyền BTC</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                    <TextInput
+                      style={styles.modPinInput}
+                      secureTextEntry
+                      placeholder="Nhập mã PIN Giáo viên / BTC..."
+                      placeholderTextColor="#64748B"
+                      value={modPinInput}
+                      onChangeText={setModPinInput}
+                      onSubmitEditing={handleVerifyModeratorPin}
+                    />
+                    <TouchableOpacity
+                      style={styles.modVerifyBtn}
+                      disabled={isVerifyingPin}
+                      onPress={handleVerifyModeratorPin}
+                    >
+                      {isVerifyingPin ? (
+                        <ActivityIndicator color="#020617" size="small" />
+                      ) : (
+                        <Text style={styles.modVerifyBtnText}>🔓 Xác Thực</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
 
               <View style={styles.studioGrid}>
@@ -944,7 +1024,7 @@ const styles = StyleSheet.create({
   modAuthTitle: { color: '#FCD34D', fontSize: 12.5, fontWeight: '900' },
   modAuthSub: { color: '#94A3B8', fontSize: 11.5, marginTop: 2 },
   modPinInput: {
-    minWidth: 210,
+    minWidth: 185,
     backgroundColor: '#0B1120',
     borderWidth: 1,
     borderColor: 'rgba(245,158,11,0.5)',
@@ -954,6 +1034,22 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12.5,
   },
+  modVerifyBtn: {
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    borderRadius: 9,
+  },
+  modVerifyBtnText: { color: '#020617', fontSize: 12, fontWeight: '900' },
+  modLockBtn: {
+    backgroundColor: 'rgba(244,63,94,0.18)',
+    borderWidth: 1,
+    borderColor: '#F43F5E',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 9,
+  },
+  modLockBtnText: { color: '#FDA4AF', fontSize: 11.5, fontWeight: '800' },
 
   studioGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
   studioCard: {
