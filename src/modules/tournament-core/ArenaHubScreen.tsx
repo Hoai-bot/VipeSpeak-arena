@@ -384,6 +384,64 @@ export default function ArenaHubScreen({
     }
   };
 
+  // Xuất Bảng Điểm CSV chuẩn Excel (có UTF-8 BOM chống lỗi font tiếng Việt)
+  const handleExportMatchesCsv = () => {
+    if (recentMatches.length === 0) {
+      setHubStatusMsg(isVi ? '⚠️ Chưa có dữ liệu trận đấu để xuất file.' : '⚠️ No match data to export.');
+      return;
+    }
+
+    const headers = [
+      'STT',
+      'Ma_Phong',
+      'The_Thuc',
+      'Cap_Do_CEFR',
+      'Thi_Sinh_1',
+      'MSSV_1',
+      'Diem_P1',
+      'Thi_Sinh_2',
+      'MSSV_2',
+      'Diem_P2',
+      'Diem_Tong_Ket',
+      'Trang_Thai_VAR',
+      'Ngay_Thi',
+    ];
+
+    const escapeCsv = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+
+    const rows = recentMatches.map((m, idx) => [
+      idx + 1,
+      m.room_code || m.id.slice(0, 6).toUpperCase(),
+      m.mode,
+      m.cefr_level,
+      m.player1_name,
+      m.player1_code || '',
+      m.player1_score ?? 0,
+      m.player2_name || '',
+      m.player2_code || '',
+      m.player2_score ?? '',
+      m.final_score ?? m.player1_score ?? 0,
+      m.live_status === 'VAR_VERIFIED' ? 'DA_CHOT_VAR' : 'AI_CHAM_TU_DONG',
+      m.created_at ? new Date(m.created_at).toLocaleString('vi-VN') : '',
+    ]);
+
+    const csvContent =
+      '\uFEFF' + [headers.map(escapeCsv).join(','), ...rows.map((r) => r.map(escapeCsv).join(','))].join('\n');
+
+    if (Platform.OS === 'web') {
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Bang_Diem_VipeSpeak_Arena_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setHubStatusMsg(isVi ? '✅ Đã xuất file Bảng Điểm Excel/CSV thành công!' : '✅ Exported gradebook CSV!');
+    }
+  };
+
   // Tính toán đối soát doanh thu & hoa hồng % trên mỗi thí sinh từ Sổ cái bất biến
   const handleInspectBilling = async (tourney: TournamentItem) => {
     setSelectedBillingTourney(tourney);
@@ -923,19 +981,29 @@ export default function ArenaHubScreen({
           )}
 
           {/* =================================================================
-              TAB 2: PHÒNG THẨM ĐỊNH GIẢNG VIÊN ("AUDIO VAR LAB")
+              TAB 2: PHÒNG THẨM ĐỊNH GIẢNG VIÊN ("AUDIO VAR LAB") + XUẤT BẢNG ĐIỂM
              ================================================================= */}
           {hubTab === 'AUDIO_VAR' && (
             <View style={styles.varSection}>
               <View style={styles.varBanner}>
-                <Text style={styles.varBannerTitle}>
-                  🛡️ {isVi ? 'PHÒNG THẨM ĐỊNH AUDIO VAR GIẢNG VIÊN' : 'INSTRUCTOR AUDIO VAR VERIFICATION LAB'}
-                </Text>
-                <Text style={styles.varBannerDesc}>
-                  {isVi
-                    ? 'Nghe lại bản ghi âm gốc từng lượt thi đấu (SOLO, RELAY, ROLEPLAY, DEBATE), kiểm tra nhận xét AI và bấm chốt điểm chính thức đồng bộ tức thì lên Hộ chiếu SPEAK-ID.'
-                    : 'Replay original recordings across all arena matches, review AI audit notes, and lock verified scores directly onto SPEAK-ID.'}
-                </Text>
+                <View style={styles.varBannerTop}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.varBannerTitle}>
+                      🛡️ {isVi ? 'PHÒNG THẨM ĐỊNH AUDIO VAR GIẢNG VIÊN' : 'INSTRUCTOR AUDIO VAR VERIFICATION LAB'}
+                    </Text>
+                    <Text style={styles.varBannerDesc}>
+                      {isVi
+                        ? 'Nghe lại bản ghi âm gốc từng lượt thi đấu (SOLO, RELAY, ROLEPLAY, DEBATE), kiểm tra nhận xét AI và bấm chốt điểm chính thức đồng bộ tức thì lên Hộ chiếu SPEAK-ID.'
+                        : 'Replay original recordings across all arena matches, review AI audit notes, and lock verified scores directly onto SPEAK-ID.'}
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity style={styles.exportCsvBtn} onPress={handleExportMatchesCsv}>
+                    <Text style={styles.exportCsvBtnText}>
+                      📥 {isVi ? 'XUẤT BẢNG ĐIỂM EXCEL / CSV' : 'EXPORT EXCEL / CSV'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {recentMatches.length === 0 ? (
@@ -1381,8 +1449,22 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
   },
+  varBannerTop: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
   varBannerTitle: { color: '#7DD3FC', fontSize: 15, fontWeight: '900' },
   varBannerDesc: { color: '#CBD5E1', fontSize: 12.5, lineHeight: 19, marginTop: 4 },
+  exportCsvBtn: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  exportCsvBtnText: { color: '#020617', fontSize: 12, fontWeight: '900' },
   emptyVarText: { color: '#94A3B8', fontSize: 13, textAlign: 'center', paddingVertical: 24 },
   varCard: {
     backgroundColor: '#111827',
