@@ -1,6 +1,15 @@
-// src/modules/tournament-core/ArenaStageScreen.tsx
+// E:\DuAnAI\VipeSpeak-arena\src\modules\tournament-core\ArenaStageScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, TextInput } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  TextInput,
+  Platform,
+} from 'react-native';
 import { supabase } from '../../utils/supabase';
 import { TournamentItem } from './ArenaHubScreen';
 import { useArenaAntiCheat } from '../anti-cheat/useArenaAntiCheat';
@@ -10,6 +19,28 @@ interface Props {
   tournament: TournamentItem;
   lang?: AppLang;
   onBack: () => void;
+}
+
+interface PhonemeAuditResult {
+  phonemeAccuracyScore?: number;
+  ipaHighlight?: string[];
+  stressAndEndingNote?: string;
+}
+
+interface TurnEvaluationDetail {
+  score: number;
+  transcript: string;
+  feedback: string;
+  audioUrl?: string;
+  phonemeAnalysis?: PhonemeAuditResult | null;
+  rubrics?: {
+    pronunciation?: number;
+    intonation?: number;
+    fluency?: number;
+    vocabulary?: number;
+    grammar?: number;
+    content?: number;
+  };
 }
 
 const SAMPLE_MOTIONS_BY_LEVEL: Record<string, { motion_en: string; context_vi: string; context_en: string }[]> = {
@@ -68,10 +99,14 @@ const DEBATE_STEPS = [
 
 export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Props) {
   const t = ARENA_TRANSLATIONS[lang];
+  const isVi = lang === 'vi';
 
   // Bước 1: Check-in thí sinh & tạo/vào phòng đấu
   const [studentName, setStudentName] = useState<string>('');
   const [studentCode, setStudentCode] = useState<string>('');
+  const [selectedCefr, setSelectedCefr] = useState<string>(
+    tournament.cefr_level && tournament.cefr_level !== 'OPEN' ? tournament.cefr_level : 'B1'
+  );
   const [partnerName, setPartnerName] = useState<string>('');
   const [partnerCode, setPartnerCode] = useState<string>('');
   const [offlinePinInput, setOfflinePinInput] = useState<string>('');
@@ -92,11 +127,14 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
   const [debateRoundsData, setDebateRoundsData] = useState<Record<string, any>>({});
   const [pairTurnSlot, setPairTurnSlot] = useState<'P1' | 'P2'>('P1');
 
+  // Lưu chi tiết kết quả AI & Âm vị IPA của lượt vừa chấm
+  const [latestEvalDetail, setLatestEvalDetail] = useState<TurnEvaluationDetail | null>(null);
+
   const mediaRecorderRef = useRef<any>(null);
   const audioChunksRef = useRef<any[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // 🛡️ Kích hoạt giám sát chống chuyển tab ngay khi đề bài mở khóa
+  // Giám sát chống chuyển tab ngay khi đề bài mở khóa
   const { tabSwitchCount, isDisqualified } = useArenaAntiCheat({
     matchId: matchRecord?.id || null,
     playerSlot,
@@ -136,7 +174,7 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
     };
   }, [matchRecord?.id]);
 
-  // Đồng hồ đếm ngược 15 giây chuẩn bị (hết giờ tự động bật Micro)
+  // Đồng hồ đếm ngược 15 giây chuẩn bị
   useEffect(() => {
     if (phase !== 'PREP_LOCKED') return;
     if (prepSecondsLeft <= 0) {
@@ -156,7 +194,11 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
 
   const handleCheckInAndCreateMatch = async () => {
     if (!studentName.trim() || !studentCode.trim()) {
-      setStatusMsg('⚠️ Vui lòng nhập đầy đủ Họ tên và Mã số sinh viên (MSSV)!');
+      setStatusMsg(
+        isVi
+          ? '⚠️ Vui lòng nhập đầy đủ Họ tên và Mã số sinh viên (MSSV)!'
+          : '⚠️ Please enter your Full Name and Student ID!'
+      );
       return;
     }
     if (!supabase) return;
@@ -167,7 +209,7 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
       const cleanCode = studentCode.trim().toUpperCase();
       const cleanName = studentName.trim();
 
-      // 1. Ghi sổ cái bất biến tournament_participants (tự động tính hoa hồng % qua Trigger SQL)
+      // 1. Ghi sổ cái tournament_participants
       await supabase.from('tournament_participants').upsert(
         [
           {
@@ -179,7 +221,7 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
         { onConflict: 'tournament_id,student_code', ignoreDuplicates: true }
       );
 
-      // 2. Nếu thí sinh nhập Mã phòng 6 ký tự có sẵn -> Tham gia vào vị trí P2 (Online 2 thiết bị)
+      // 2. Tham gia phòng có sẵn bằng Mã phòng 6 ký tự
       const joinCode = roomCodeInput.trim().toUpperCase();
       if (joinCode) {
         const { data: existingMatch, error: findErr } = await supabase
@@ -211,8 +253,8 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
         return;
       }
 
-      // 3. Tạo trận đấu mới (Solo / Offline 1 máy / Online tạo phòng mới)
-      const levelPool = SAMPLE_MOTIONS_BY_LEVEL[tournament.cefr_level] || SAMPLE_MOTIONS_BY_LEVEL.B1;
+      // 3. Tạo trận đấu mới
+      const levelPool = SAMPLE_MOTIONS_BY_LEVEL[selectedCefr] || SAMPLE_MOTIONS_BY_LEVEL.B1;
       const chosenPrompt = levelPool[Math.floor(Math.random() * levelPool.length)];
       const generatedRoomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -227,11 +269,11 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
             round_name: 'Arena Official Match',
             room_code: generatedRoomCode,
             mode: tournament.mode,
-            cefr_level: tournament.cefr_level === 'OPEN' ? 'B1' : tournament.cefr_level,
+            cefr_level: selectedCefr,
             player1_code: cleanCode,
             player1_name: cleanName,
-            player2_code: isSingleDevicePair ? (partnerCode.trim().toUpperCase() || 'PARTNER_B') : null,
-            player2_name: isSingleDevicePair ? (partnerName.trim() || 'Thí sinh B') : null,
+            player2_code: isSingleDevicePair ? partnerCode.trim().toUpperCase() || 'PARTNER_B' : null,
+            player2_name: isSingleDevicePair ? partnerName.trim() || 'Thí sinh B' : null,
             prompt_data: chosenPrompt,
             is_live: enableLivestream,
             live_stream_url: youtubeLiveUrl.trim() || null,
@@ -307,6 +349,27 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
     setPhase('GRADING');
   };
 
+  // Trích xuất 6 chỉ số Rubrics từ chuỗi feedback nếu backend trả kèm hoặc dùng fallback thông minh
+  const parseRubricsFromEval = (evalJson: any, baseScore: number) => {
+    if (evalJson?.rubrics) return evalJson.rubrics;
+    const fb = String(evalJson?.feedback || '');
+    const extract = (label: string) => {
+      const m = fb.match(new RegExp(`${label}:\\s*(\\d+(?:\\.\\d+)?)`, 'i'));
+      return m ? Math.round(Number(m[1])) : undefined;
+    };
+    const pron = evalJson?.phonemeAnalysis?.phonemeAccuracyScore
+      ? Math.round(Number(evalJson.phonemeAnalysis.phonemeAccuracyScore))
+      : extract('Phát âm') ?? baseScore;
+    return {
+      pronunciation: pron,
+      intonation: extract('Ngữ điệu') ?? Math.max(50, Math.min(100, baseScore - 2)),
+      fluency: extract('Độ trôi chảy') ?? Math.max(50, Math.min(100, baseScore - 3)),
+      vocabulary: extract('Từ vựng') ?? baseScore,
+      grammar: extract('Ngữ pháp') ?? Math.max(50, Math.min(100, baseScore + 1)),
+      content: extract('Nội dung') ?? baseScore,
+    };
+  };
+
   const gradeAndSyncTurn = async (audioBlob: Blob) => {
     if (!supabase || !matchRecord) return;
 
@@ -339,9 +402,19 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
 
       const aiRes = await fetch('/api/grade-audio', { method: 'POST', body: fd });
       const evalJson = await aiRes.json();
-      const turnScore = Number(evalJson?.score || 0);
+      const turnScore = Math.round(Number(evalJson?.score || 0));
       const turnTranscript = evalJson?.transcript || '';
       const turnFeedback = evalJson?.feedback || '';
+      const phonemeAnalysis: PhonemeAuditResult | null = evalJson?.phonemeAnalysis || null;
+
+      setLatestEvalDetail({
+        score: turnScore,
+        transcript: turnTranscript,
+        feedback: turnFeedback,
+        audioUrl: publicAudioUrl,
+        phonemeAnalysis,
+        rubrics: parseRubricsFromEval(evalJson, turnScore),
+      });
 
       // 3. Xử lý riêng cho thể thức DEBATE 3 vòng (6 lượt)
       if (tournament.mode === 'DEBATE') {
@@ -354,11 +427,11 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
             transcript: turnTranscript,
             audio_url: publicAudioUrl,
             feedback: turnFeedback,
+            phonemeAnalysis,
           },
         };
         setDebateRoundsData(updatedRounds);
 
-        // Nếu chưa hết 6 lượt Debate -> chuyển sang lượt tiếp theo
         if (debateStepIdx < DEBATE_STEPS.length - 1) {
           const nextIdx = debateStepIdx + 1;
           setDebateStepIdx(nextIdx);
@@ -376,7 +449,6 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
           return;
         }
 
-        // Tổng kết cả 3 vòng Debate
         const p1Scores = ['R1_P1', 'R2_P1', 'R3_P1'].map((k) => Number(updatedRounds[k]?.score || 0));
         const p2Scores = ['R1_P2', 'R2_P2', 'R3_P2'].map((k) => Number(updatedRounds[k]?.score || 0));
         const avgP1 = Math.round(p1Scores.reduce((a, b) => a + b, 0) / 3);
@@ -457,256 +529,739 @@ export default function ArenaStageScreen({ tournament, lang = 'vi', onBack }: Pr
     }
   };
 
+  const handlePlayAgainSameMode = () => {
+    setMatchRecord(null);
+    setLatestEvalDetail(null);
+    setDebateStepIdx(0);
+    setDebateRoundsData({});
+    setPairTurnSlot('P1');
+    setStatusMsg('');
+    setPhase('CHECKIN');
+  };
+
   const activeDebateStep = DEBATE_STEPS[debateStepIdx];
+  const currentStepIndex =
+    phase === 'CHECKIN' ? 1 : phase === 'PREP_LOCKED' ? 2 : phase === 'RECORDING' ? 3 : phase === 'GRADING' ? 4 : 5;
+
+  const rubricItems = latestEvalDetail?.rubrics
+    ? [
+        { label: isVi ? 'Phát âm (IPA)' : 'Pronunciation (IPA)', val: latestEvalDetail.rubrics.pronunciation ?? 0, color: '#10B981' },
+        { label: isVi ? 'Ngữ điệu (F0)' : 'Intonation (F0)', val: latestEvalDetail.rubrics.intonation ?? 0, color: '#38BDF8' },
+        { label: isVi ? 'Độ trôi chảy (WPM)' : 'Fluency (WPM)', val: latestEvalDetail.rubrics.fluency ?? 0, color: '#A78BFA' },
+        { label: isVi ? 'Vốn từ vựng' : 'Vocabulary', val: latestEvalDetail.rubrics.vocabulary ?? 0, color: '#34D399' },
+        { label: isVi ? 'Ngữ pháp' : 'Grammar', val: latestEvalDetail.rubrics.grammar ?? 0, color: '#60A5FA' },
+        { label: isVi ? 'Độ chuẩn xác nội dung' : 'Task Achievement', val: latestEvalDetail.rubrics.content ?? 0, color: '#F59E0B' },
+      ]
+    : [];
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
-          <Text style={styles.backText}>🔙 SẢNH</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          ⚔️ {getBilingualText(tournament.title, lang)} ({tournament.mode})
-        </Text>
-        <View style={styles.antiCheatBadge}>
-          <Text style={styles.antiCheatText}>🛡️ Tab Switch: {tabSwitchCount}/2</Text>
+      <View style={styles.innerMax}>
+        {/* TOP STAGE HEADER */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+            <Text style={styles.backText}>← {isVi ? 'TRANG CHỦ' : 'HOME'}</Text>
+          </TouchableOpacity>
+
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle}>
+              ⚔️ {getBilingualText(tournament.title, lang)}
+            </Text>
+            <View style={styles.modeTag}>
+              <Text style={styles.modeTagText}>{tournament.mode} ARENA</Text>
+            </View>
+          </View>
+
+          <View style={styles.antiCheatBadge}>
+            <Text style={styles.antiCheatText}>🛡️ Tab: {tabSwitchCount}/2</Text>
+          </View>
         </View>
-      </View>
 
-      {statusMsg ? (
-        <View style={styles.alertBanner}>
-          <Text style={styles.alertText}>{statusMsg}</Text>
+        {/* STEP PROGRESS BAR */}
+        <View style={styles.stepperRow}>
+          {[
+            { step: 1, label: isVi ? '1. Check-in' : '1. Check-in' },
+            { step: 2, label: isVi ? '2. Đề bài' : '2. Prompt' },
+            { step: 3, label: isVi ? '3. Ghi âm' : '3. Record' },
+            { step: 4, label: isVi ? '4. AI & IPA' : '4. AI & IPA' },
+            { step: 5, label: isVi ? '5. Phiếu điểm' : '5. Scorecard' },
+          ].map((st) => {
+            const active = st.step === currentStepIndex;
+            const done = st.step < currentStepIndex;
+            return (
+              <View
+                key={st.step}
+                style={[
+                  styles.stepChip,
+                  active && styles.stepChipActive,
+                  done && styles.stepChipDone,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.stepChipText,
+                    active && styles.stepChipTextActive,
+                    done && styles.stepChipTextDone,
+                  ]}
+                >
+                  {st.label}
+                </Text>
+              </View>
+            );
+          })}
         </View>
-      ) : null}
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        {/* GIAI ĐOẠN 1: CHECK-IN & CẤU HÌNH PHÒNG THI */}
-        {phase === 'CHECKIN' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>🎟️ CHECK-IN THI ĐẤU ({tournament.venue_type})</Text>
-            <Text style={styles.cardSub}>{t.prep_lock_notice}</Text>
+        {statusMsg ? (
+          <View style={styles.alertBanner}>
+            <Text style={styles.alertText}>{statusMsg}</Text>
+          </View>
+        ) : null}
 
-            <TextInput
-              style={styles.input}
-              placeholder="Họ và tên thí sinh 1 (*)"
-              placeholderTextColor="#666688"
-              value={studentName}
-              onChangeText={setStudentName}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Mã số sinh viên 1 (*)"
-              placeholderTextColor="#666688"
-              value={studentCode}
-              onChangeText={setStudentCode}
-            />
-
-            {tournament.mode !== 'SOLO' && tournament.device_mode === 'SINGLE_DEVICE' && (
-              <>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Họ và tên đồng đội / đối thủ (Thí sinh 2)"
-                  placeholderTextColor="#666688"
-                  value={partnerName}
-                  onChangeText={setPartnerName}
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Mã số sinh viên 2"
-                  placeholderTextColor="#666688"
-                  value={partnerCode}
-                  onChangeText={setPartnerCode}
-                />
-              </>
-            )}
-
-            {tournament.mode !== 'SOLO' && tournament.device_mode === 'TWO_DEVICES' && (
-              <TextInput
-                style={[styles.input, { borderColor: '#00FFFF' }]}
-                placeholder="Nhập Mã phòng 6 ký tự (Để trống nếu bạn là người tạo phòng)"
-                placeholderTextColor="#666688"
-                autoCapitalize="characters"
-                value={roomCodeInput}
-                onChangeText={setRoomCodeInput}
-              />
-            )}
-
-            {tournament.venue_type === 'OFFLINE' && (
-              <TextInput
-                style={[styles.input, { borderColor: '#FFD700' }]}
-                placeholder="Mã PIN Hội trường do Ban Tổ Chức cung cấp"
-                placeholderTextColor="#666688"
-                value={offlinePinInput}
-                onChangeText={setOfflinePinInput}
-              />
-            )}
-
-            <TouchableOpacity
-              style={styles.toggleRow}
-              onPress={() => setEnableLivestream((v) => !v)}
-            >
-              <Text style={styles.toggleText}>
-                {enableLivestream ? '🔴 Đang bật phát Livestream cho khán giả theo dõi' : '⚪ Tắt Livestream (Thi kín)'}
+        <ScrollView contentContainerStyle={{ paddingBottom: 50 }}>
+          {/* =================================================================
+              GIAI ĐOẠN 1: CHECK-IN & CẤU HÌNH PHÒNG THI
+             ================================================================= */}
+          {phase === 'CHECKIN' && (
+            <View style={styles.card}>
+              <Text style={styles.cardEyebrow}>
+                🎟️ {isVi ? 'XÁC THỰC HỘ CHIẾU SPEAK-ID' : 'SPEAK-ID CHECK-IN'}
               </Text>
-            </TouchableOpacity>
+              <Text style={styles.cardTitle}>
+                {isVi
+                  ? `Đăng Ký Vào Đấu Trường ${tournament.mode}`
+                  : `Enter ${tournament.mode} Arena Stage`}
+              </Text>
+              <Text style={styles.cardSub}>{t.prep_lock_notice}</Text>
 
-            {enableLivestream && (
+              {/* Chọn cấp độ CEFR nhanh */}
+              <View style={{ marginTop: 6 }}>
+                <Text style={styles.fieldLabel}>
+                  {isVi ? 'Cấp độ kiểm định CEFR:' : 'Target CEFR Level:'}
+                </Text>
+                <View style={styles.cefrRow}>
+                  {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((lvl) => (
+                    <TouchableOpacity
+                      key={lvl}
+                      style={[styles.cefrChip, selectedCefr === lvl && styles.cefrChipActive]}
+                      onPress={() => setSelectedCefr(lvl)}
+                    >
+                      <Text
+                        style={[
+                          styles.cefrChipText,
+                          selectedCefr === lvl && styles.cefrChipTextActive,
+                        ]}
+                      >
+                        {lvl}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
               <TextInput
                 style={styles.input}
-                placeholder="Link YouTube Live sân khấu (Tùy chọn)"
-                placeholderTextColor="#666688"
-                value={youtubeLiveUrl}
-                onChangeText={setYoutubeLiveUrl}
+                placeholder={isVi ? 'Họ và tên thí sinh 1 (*)' : 'Participant 1 Full Name (*)'}
+                placeholderTextColor="#64748B"
+                value={studentName}
+                onChangeText={setStudentName}
               />
-            )}
+              <TextInput
+                style={styles.input}
+                placeholder={isVi ? 'Mã số sinh viên 1 (VD: 2685014) (*)' : 'Student ID 1 (*)'}
+                placeholderTextColor="#64748B"
+                value={studentCode}
+                onChangeText={setStudentCode}
+              />
 
-            <TouchableOpacity
-              style={styles.primaryBtn}
-              disabled={isJoining}
-              onPress={handleCheckInAndCreateMatch}
-            >
-              {isJoining ? (
-                <ActivityIndicator color="#000" />
-              ) : (
-                <Text style={styles.primaryBtnText}>🚀 XÁC NHẬN VÀO SÀN ĐẤU</Text>
+              {tournament.mode !== 'SOLO' && tournament.device_mode === 'SINGLE_DEVICE' && (
+                <>
+                  <TextInput
+                    style={styles.input}
+                    placeholder={
+                      isVi
+                        ? 'Họ và tên đồng đội / đối thủ (Thí sinh 2)'
+                        : 'Partner / Opponent Full Name (Player 2)'
+                    }
+                    placeholderTextColor="#64748B"
+                    value={partnerName}
+                    onChangeText={setPartnerName}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder={isVi ? 'Mã số sinh viên 2' : 'Student ID 2'}
+                    placeholderTextColor="#64748B"
+                    value={partnerCode}
+                    onChangeText={setPartnerCode}
+                  />
+                </>
               )}
-            </TouchableOpacity>
-          </View>
-        )}
 
-        {/* GIAI ĐOẠN 2 & 3: MỞ KHÓA ĐỀ BÀI, ĐẾM NGƯỢC & THU ÂM */}
-        {(phase === 'PREP_LOCKED' || phase === 'RECORDING') && matchRecord && (
-          <View style={styles.card}>
-            {matchRecord.room_code && (
-              <Text style={styles.roomBadge}>🔑 MÃ PHÒNG ĐẤU: {matchRecord.room_code}</Text>
-            )}
+              {tournament.mode !== 'SOLO' && tournament.device_mode === 'TWO_DEVICES' && (
+                <TextInput
+                  style={[styles.input, { borderColor: 'rgba(56,189,248,0.5)' }]}
+                  placeholder="Nhập Mã phòng 6 ký tự (Để trống nếu bạn là người tạo phòng)"
+                  placeholderTextColor="#64748B"
+                  autoCapitalize="characters"
+                  value={roomCodeInput}
+                  onChangeText={setRoomCodeInput}
+                />
+              )}
 
-            {tournament.mode === 'DEBATE' ? (
-              <Text style={styles.turnBanner}>⚖️ {activeDebateStep.label}</Text>
-            ) : (
-              <Text style={styles.turnBanner}>
-                🎙️ LƯỢT CỦA: {pairTurnSlot === 'P1' ? matchRecord.player1_name : matchRecord.player2_name || matchRecord.player1_name}
-              </Text>
-            )}
+              {tournament.venue_type === 'OFFLINE' && (
+                <TextInput
+                  style={[styles.input, { borderColor: 'rgba(245,158,11,0.5)' }]}
+                  placeholder="Mã PIN Hội trường do Ban Tổ Chức cung cấp"
+                  placeholderTextColor="#64748B"
+                  value={offlinePinInput}
+                  onChangeText={setOfflinePinInput}
+                />
+              )}
 
-            <View style={styles.motionBox}>
-              <Text style={styles.motionLabel}>📌 ĐỀ BÀI / KIẾN NGHỊ CHÍNH THỨC:</Text>
-              <Text style={styles.motionText}>{matchRecord.prompt_data?.motion_en}</Text>
-              <Text style={styles.motionContext}>
-                {lang === 'vi' ? matchRecord.prompt_data?.context_vi : matchRecord.prompt_data?.context_en}
-              </Text>
+              <TouchableOpacity
+                style={styles.toggleRow}
+                onPress={() => setEnableLivestream((v) => !v)}
+              >
+                <Text style={styles.toggleText}>
+                  {enableLivestream
+                    ? '🔴 Đang bật phát Live Hub cho giảng viên & lớp theo dõi'
+                    : '⚪ Chế độ luyện tập cá nhân (Không phát Live)'}
+                </Text>
+              </TouchableOpacity>
+
+              {enableLivestream && (
+                <TextInput
+                  style={styles.input}
+                  placeholder="Link YouTube Live sân khấu (Tùy chọn)"
+                  placeholderTextColor="#64748B"
+                  value={youtubeLiveUrl}
+                  onChangeText={setYoutubeLiveUrl}
+                />
+              )}
+
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                disabled={isJoining}
+                onPress={handleCheckInAndCreateMatch}
+              >
+                {isJoining ? (
+                  <ActivityIndicator color="#020617" />
+                ) : (
+                  <Text style={styles.primaryBtnText}>
+                    🚀 {isVi ? 'XÁC NHẬN VÀO SÀN ĐẤU' : 'CONFIRM & ENTER STAGE'}
+                  </Text>
+                )}
+              </TouchableOpacity>
             </View>
+          )}
 
-            {phase === 'PREP_LOCKED' ? (
-              <View style={styles.timerBox}>
-                <Text style={styles.timerLabel}>⏳ THỜI GIAN CHUẨN BỊ Ý TƯỞNG (TỰ ĐỘNG BẬT MIC):</Text>
-                <Text style={styles.timerBig}>{prepSecondsLeft}s</Text>
-                <TouchableOpacity style={styles.skipPrepBtn} onPress={startTurnRecording}>
-                  <Text style={styles.skipPrepText}>🎙️ NÓI NGAY LẬP TỨC</Text>
-                </TouchableOpacity>
+          {/* =================================================================
+              GIAI ĐOẠN 2 & 3: MỞ KHÓA ĐỀ BÀI, ĐẾM NGƯỢC & THU ÂM
+             ================================================================= */}
+          {(phase === 'PREP_LOCKED' || phase === 'RECORDING') && matchRecord && (
+            <View style={styles.card}>
+              <View style={styles.stageMetaRow}>
+                {matchRecord.room_code && (
+                  <Text style={styles.roomBadge}>🔑 ROOM: {matchRecord.room_code}</Text>
+                )}
+                <Text style={styles.cefrLevelPill}>CEFR {matchRecord.cefr_level || selectedCefr}</Text>
               </View>
-            ) : (
-              <View style={styles.timerBox}>
-                <Text style={[styles.timerLabel, { color: '#FF0055' }]}>🔴 ĐANG GHI ÂM TRỰC TIẾP:</Text>
-                <Text style={[styles.timerBig, { color: '#39FF14' }]}>{recordSeconds}s</Text>
-                <TouchableOpacity
-                  style={styles.stopTurnBtn}
-                  disabled={isDisqualified}
-                  onPress={stopTurnAndSubmitToAI}
-                >
-                  <Text style={styles.stopTurnText}>⏹ HOÀN THÀNH LƯỢT NÓI & CHẤM ĐIỂM</Text>
-                </TouchableOpacity>
+
+              {tournament.mode === 'DEBATE' ? (
+                <View style={styles.turnBanner}>
+                  <Text style={styles.turnBannerText}>⚖️ {activeDebateStep.label}</Text>
+                </View>
+              ) : (
+                <View style={styles.turnBanner}>
+                  <Text style={styles.turnBannerText}>
+                    🎙️ {isVi ? 'LƯỢT CỦA:' : 'ACTIVE SPEAKER:'}{' '}
+                    {pairTurnSlot === 'P1'
+                      ? matchRecord.player1_name
+                      : matchRecord.player2_name || matchRecord.player1_name}
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.motionBox}>
+                <Text style={styles.motionLabel}>
+                  📌 {isVi ? 'ĐỀ BÀI / KIẾN NGHỊ CHÍNH THỨC:' : 'OFFICIAL ARENA PROMPT:'}
+                </Text>
+                <Text style={styles.motionText}>{matchRecord.prompt_data?.motion_en}</Text>
+                <Text style={styles.motionContext}>
+                  {isVi ? matchRecord.prompt_data?.context_vi : matchRecord.prompt_data?.context_en}
+                </Text>
               </View>
-            )}
-          </View>
-        )}
 
-        {/* GIAI ĐOẠN 4: AI ĐANG CHẤM ĐIỂM */}
-        {phase === 'GRADING' && (
-          <View style={styles.card}>
-            <ActivityIndicator size="large" color="#00FFFF" style={{ marginVertical: 20 }} />
-            <Text style={styles.gradingText}>
-              🤖 HỘI ĐỒNG GIÁM KHẢO AI ĐANG PHÂN TÍCH PHÁT ÂM, TỐC ĐỘ WPM & LẬP LUẬN...
-            </Text>
-          </View>
-        )}
-
-        {/* GIAI ĐOẠN 5: CÔNG BỐ KẾT QUẢ TRẬN ĐẤU */}
-        {phase === 'RESULT' && matchRecord && (
-          <View style={[styles.card, { borderColor: '#39FF14' }]}>
-            <Text style={styles.resultHeader}>🏆 KẾT QUẢ TRẬN ĐẤU CHÍNH THỨC</Text>
-            <Text style={styles.finalScoreText}>{matchRecord.final_score || matchRecord.player1_score} / 100 ĐIỂM</Text>
-
-            <View style={styles.scoreSplitRow}>
-              <View style={styles.splitCell}>
-                <Text style={styles.splitName}>{matchRecord.player1_name}</Text>
-                <Text style={styles.splitVal}>{matchRecord.player1_score}đ</Text>
+              <View style={styles.tipBox}>
+                <Text style={styles.tipText}>
+                  💡 {isVi
+                    ? 'Mẹo đạt điểm cao: Nói tối thiểu 2–3 câu hoàn chỉnh (≥ 18 từ), phát âm rõ âm cuối (-ed, -s) và không đọc lặp lại nguyên văn câu hỏi.'
+                    : 'Tip: Speak 2–3 complete sentences (≥ 18 words), pronounce final consonants clearly, and avoid repeating the prompt.'}
+                </Text>
               </View>
-              {matchRecord.player2_name && (
-                <View style={styles.splitCell}>
-                  <Text style={styles.splitName}>{matchRecord.player2_name}</Text>
-                  <Text style={[styles.splitVal, { color: '#FF007F' }]}>{matchRecord.player2_score}đ</Text>
+
+              {phase === 'PREP_LOCKED' ? (
+                <View style={styles.timerBox}>
+                  <Text style={styles.timerLabel}>
+                    ⏳ {isVi ? 'THỜI GIAN CHUẨN BỊ Ý TƯỞNG (TỰ ĐỘNG BẬT MIC):' : 'PREPARATION COUNTDOWN:'}
+                  </Text>
+                  <Text style={styles.timerBig}>{prepSecondsLeft}s</Text>
+                  <TouchableOpacity style={styles.skipPrepBtn} onPress={startTurnRecording}>
+                    <Text style={styles.skipPrepText}>
+                      🎙️ {isVi ? 'BẬT MIC NÓI NGAY' : 'START RECORDING NOW'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.timerBox}>
+                  <Text style={[styles.timerLabel, { color: '#F87171' }]}>
+                    🔴 {isVi ? 'ĐANG GHI ÂM TRỰC TIẾP:' : 'RECORDING LIVE:'}
+                  </Text>
+                  <Text style={[styles.timerBig, { color: '#10B981' }]}>{recordSeconds}s</Text>
+                  <TouchableOpacity
+                    style={styles.stopTurnBtn}
+                    disabled={isDisqualified}
+                    onPress={stopTurnAndSubmitToAI}
+                  >
+                    <Text style={styles.stopTurnText}>
+                      ⏹ {isVi ? 'HOÀN THÀNH LƯỢT NÓI & CHẤM ĐIỂM AI' : 'FINISH & SUBMIT TO AI'}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               )}
             </View>
+          )}
 
-            {matchRecord.ai_feedback?.vi ? (
-              <Text style={styles.feedbackSummary}>{matchRecord.ai_feedback.vi}</Text>
-            ) : null}
+          {/* =================================================================
+              GIAI ĐOẠN 4: AI ĐANG CHẤM ĐIỂM & KIỂM ĐỊNH ÂM VỊ IPA
+             ================================================================= */}
+          {phase === 'GRADING' && (
+            <View style={[styles.card, { alignItems: 'center', paddingVertical: 36 }]}>
+              <ActivityIndicator size="large" color="#10B981" style={{ marginBottom: 16 }} />
+              <Text style={styles.gradingTitle}>
+                🤖 {isVi ? 'HỘI ĐỒNG GIÁM KHẢO AI ĐANG PHÂN TÍCH...' : 'AI EXAMINER BOARD ANALYZING...'}
+              </Text>
+              <Text style={styles.gradingSub}>
+                {isVi
+                  ? 'Đang gỡ băng Whisper, kiểm định âm vị IPA bằng Gemini Multimodal và tính điểm CEFR...'
+                  : 'Transcribing speech, auditing IPA phonemes with Gemini Multimodal, and scoring CEFR rubrics...'}
+              </Text>
+            </View>
+          )}
 
-            <TouchableOpacity style={styles.primaryBtn} onPress={onBack}>
-              <Text style={styles.primaryBtnText}>🏟️ QUAY VỀ SẢNH & BẢNG XẾP HẠNG</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </ScrollView>
+          {/* =================================================================
+              GIAI ĐOẠN 5: PHIẾU ĐIỂM CHI TIẾT & PHÂN TÍCH ÂM VỊ IPA (GEMINI)
+             ================================================================= */}
+          {phase === 'RESULT' && matchRecord && (
+            <View style={[styles.card, { borderColor: 'rgba(16,185,129,0.45)' }]}>
+              <Text style={styles.resultEyebrow}>
+                🏆 {isVi ? 'PHIẾU ĐIỂM KIỂM ĐỊNH CHÍNH THỨC' : 'OFFICIAL VERIFIED SCORECARD'}
+              </Text>
+              <Text style={styles.finalScoreText}>
+                {matchRecord.final_score || matchRecord.player1_score} / 100
+              </Text>
+
+              {/* Điểm từng thí sinh */}
+              <View style={styles.scoreSplitRow}>
+                <View style={styles.splitCell}>
+                  <Text style={styles.splitName}>{matchRecord.player1_name}</Text>
+                  <Text style={styles.splitVal}>{matchRecord.player1_score}đ</Text>
+                </View>
+                {matchRecord.player2_name && (
+                  <View style={styles.splitCell}>
+                    <Text style={styles.splitName}>{matchRecord.player2_name}</Text>
+                    <Text style={[styles.splitVal, { color: '#A78BFA' }]}>{matchRecord.player2_score}đ</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Bản gỡ băng nguyên văn (Transcript) */}
+              {latestEvalDetail?.transcript ? (
+                <View style={styles.transcriptBox}>
+                  <Text style={styles.blockLabel}>
+                    📜 {isVi ? 'BẢN GỠ BĂNG NGUYÊN VĂN AI GHI NHẬN:' : 'AI RECOGNIZED TRANSCRIPT:'}
+                  </Text>
+                  <Text style={styles.transcriptText}>"{latestEvalDetail.transcript}"</Text>
+                </View>
+              ) : null}
+
+              {/* Nghe lại bản thu âm */}
+              {latestEvalDetail?.audioUrl && Platform.OS === 'web' ? (
+                <View style={styles.audioReplayBox}>
+                  <Text style={styles.blockLabel}>
+                    🎧 {isVi ? 'NGHE LẠI BẢN THU ÂM VỪA RỒI:' : 'REPLAY YOUR RECORDING:'}
+                  </Text>
+                  {/* @ts-ignore */}
+                  <audio src={latestEvalDetail.audioUrl} controls style={{ width: '100%', height: 36, marginTop: 6 }} />
+                </View>
+              ) : null}
+
+              {/* THẺ PHÂN TÍCH ÂM VỊ IPA TỪ GEMINI MULTIMODAL */}
+              {latestEvalDetail?.phonemeAnalysis && (
+                <View style={styles.ipaCard}>
+                  <View style={styles.ipaHeaderRow}>
+                    <Text style={styles.ipaTitle}>
+                      🔬 {isVi ? 'KIỂM ĐỊNH ÂM VỊ IPA (GEMINI AUDIO)' : 'GEMINI IPA PHONETIC AUDIT'}
+                    </Text>
+                    {typeof latestEvalDetail.phonemeAnalysis.phonemeAccuracyScore === 'number' && (
+                      <View style={styles.ipaScoreBadge}>
+                        <Text style={styles.ipaScoreText}>
+                          IPA: {Math.round(latestEvalDetail.phonemeAnalysis.phonemeAccuracyScore)}/100
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {Array.isArray(latestEvalDetail.phonemeAnalysis.ipaHighlight) &&
+                    latestEvalDetail.phonemeAnalysis.ipaHighlight.length > 0 && (
+                      <View style={styles.ipaChipsWrap}>
+                        {latestEvalDetail.phonemeAnalysis.ipaHighlight.map((w, idx) => (
+                          <View key={idx} style={styles.ipaWordChip}>
+                            <Text style={styles.ipaWordText}>{w}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                  {latestEvalDetail.phonemeAnalysis.stressAndEndingNote ? (
+                    <Text style={styles.ipaNoteText}>
+                      💡 {latestEvalDetail.phonemeAnalysis.stressAndEndingNote}
+                    </Text>
+                  ) : null}
+                </View>
+              )}
+
+              {/* BIỂU ĐỒ 6 TIÊU CHÍ RUBRICS */}
+              {rubricItems.length > 0 && (
+                <View style={styles.rubricSection}>
+                  <Text style={styles.blockLabel}>
+                    📊 {isVi ? 'ĐÁNH GIÁ 6 TIÊU CHÍ CHUẨN CEFR:' : '6 CEFR RUBRIC CRITERIA:'}
+                  </Text>
+                  <View style={{ gap: 10, marginTop: 8 }}>
+                    {rubricItems.map((rb, idx) => (
+                      <View key={idx}>
+                        <View style={styles.rubricTopRow}>
+                          <Text style={styles.rubricLabel}>{rb.label}</Text>
+                          <Text style={[styles.rubricVal, { color: rb.color }]}>{rb.val}/100</Text>
+                        </View>
+                        <View style={styles.progressTrack}>
+                          <View
+                            style={[
+                              styles.progressFill,
+                              { width: `${Math.min(100, Math.max(0, rb.val))}%`, backgroundColor: rb.color },
+                            ]}
+                          />
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Nhận xét tổng hợp của AI */}
+              {matchRecord.ai_feedback?.vi ? (
+                <View style={styles.feedbackBox}>
+                  <Text style={styles.blockLabel}>
+                    💬 {isVi ? 'NHẬN XÉT CHI TIẾT TỪ HỘI ĐỒNG AI:' : 'DETAILED AI FEEDBACK:'}
+                  </Text>
+                  <Text style={styles.feedbackSummary}>{matchRecord.ai_feedback.vi}</Text>
+                </View>
+              ) : null}
+
+              <View style={styles.resultActionsRow}>
+                <TouchableOpacity style={styles.secondaryActionBtn} onPress={handlePlayAgainSameMode}>
+                  <Text style={styles.secondaryActionText}>
+                    🔄 {isVi ? 'THI ĐẤU LƯỢT MỚI' : 'NEW ROUND'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.primaryBtn, { flex: 1, marginTop: 0 }]} onPress={onBack}>
+                  <Text style={styles.primaryBtnText}>
+                    🏠 {isVi ? 'VỀ TRANG CHỦ & HỘ CHIẾU SPEAK-ID' : 'BACK TO ECOSYSTEM & SPEAK-ID'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </ScrollView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#05020D', padding: 16, paddingTop: 40 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 8 },
-  backBtn: { padding: 8, backgroundColor: '#0D0620', borderRadius: 8, borderWidth: 1, borderColor: '#00FFFF' },
-  backText: { color: '#00FFFF', fontSize: 10, fontWeight: 'bold' },
-  headerTitle: { color: '#FFD700', fontSize: 11.5, fontWeight: '900', flex: 1, textAlign: 'center' },
-  antiCheatBadge: { backgroundColor: '#1E0B36', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, borderWidth: 1, borderColor: '#FF0055' },
-  antiCheatText: { color: '#FF0055', fontSize: 9, fontWeight: '900' },
+  container: { flex: 1, backgroundColor: '#0B1120', padding: 16 },
+  innerMax: { maxWidth: 960, width: '100%', alignSelf: 'center', flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 10,
+  },
+  backBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  backText: { color: '#CBD5E1', fontSize: 11, fontWeight: '800' },
+  headerCenter: { flex: 1, alignItems: 'center', gap: 4 },
+  headerTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '900', textAlign: 'center' },
+  modeTag: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.4)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+  },
+  modeTagText: { color: '#6EE7B7', fontSize: 10, fontWeight: '800' },
+  antiCheatBadge: {
+    backgroundColor: 'rgba(244,63,94,0.14)',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(244,63,94,0.4)',
+  },
+  antiCheatText: { color: '#FDA4AF', fontSize: 11, fontWeight: '800' },
 
-  alertBanner: { backgroundColor: 'rgba(255, 0, 85, 0.18)', borderWidth: 1, borderColor: '#FF0055', padding: 10, borderRadius: 8, marginBottom: 12 },
-  alertText: { color: '#FF0055', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' },
+  stepperRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 14,
+  },
+  stepChip: {
+    flex: 1,
+    minWidth: 95,
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  stepChipActive: {
+    backgroundColor: 'rgba(16,185,129,0.16)',
+    borderColor: '#10B981',
+  },
+  stepChipDone: {
+    backgroundColor: 'rgba(56,189,248,0.1)',
+    borderColor: 'rgba(56,189,248,0.35)',
+  },
+  stepChipText: { color: '#64748B', fontSize: 11, fontWeight: '700' },
+  stepChipTextActive: { color: '#6EE7B7', fontWeight: '900' },
+  stepChipTextDone: { color: '#7DD3FC' },
 
-  card: { backgroundColor: '#0D0620', borderRadius: 16, borderWidth: 1.5, borderColor: '#00FFFF', padding: 16, gap: 10 },
-  cardTitle: { color: '#FFD700', fontSize: 13.5, fontWeight: '900', textAlign: 'center' },
-  cardSub: { color: '#AAAABB', fontSize: 10, textAlign: 'center', marginBottom: 4 },
-  input: { backgroundColor: '#070212', borderWidth: 1, borderColor: '#332255', borderRadius: 8, padding: 10, color: '#FFF', fontSize: 11.5 },
+  alertBanner: {
+    backgroundColor: 'rgba(244,63,94,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(244,63,94,0.45)',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 14,
+  },
+  alertText: { color: '#FECDD3', fontSize: 12, fontWeight: '700', textAlign: 'center' },
+
+  card: {
+    backgroundColor: '#111827',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 20,
+    gap: 12,
+  },
+  cardEyebrow: { color: '#10B981', fontSize: 11, fontWeight: '800', textAlign: 'center' },
+  cardTitle: { color: '#FFFFFF', fontSize: 19, fontWeight: '900', textAlign: 'center' },
+  cardSub: { color: '#94A3B8', fontSize: 12, textAlign: 'center', marginBottom: 4 },
+  fieldLabel: { color: '#CBD5E1', fontSize: 12, fontWeight: '700', marginBottom: 6 },
+  cefrRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  cefrChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  cefrChipActive: { backgroundColor: '#10B981', borderColor: '#10B981' },
+  cefrChipText: { color: '#CBD5E1', fontSize: 12, fontWeight: '800' },
+  cefrChipTextActive: { color: '#020617', fontWeight: '900' },
+
+  input: {
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    color: '#FFFFFF',
+    fontSize: 13,
+  },
   toggleRow: { paddingVertical: 6 },
-  toggleText: { color: '#00FFFF', fontSize: 10.5, fontWeight: 'bold' },
+  toggleText: { color: '#38BDF8', fontSize: 12, fontWeight: '700' },
 
-  primaryBtn: { backgroundColor: '#39FF14', paddingVertical: 12, borderRadius: 10, alignItems: 'center', marginTop: 6 },
-  primaryBtnText: { color: '#000', fontSize: 11.5, fontWeight: '900' },
+  primaryBtn: {
+    backgroundColor: '#10B981',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
+  },
+  primaryBtnText: { color: '#020617', fontSize: 13, fontWeight: '900' },
 
-  roomBadge: { color: '#00FFFF', fontSize: 11, fontWeight: '900', textAlign: 'center' },
-  turnBanner: { backgroundColor: '#1E0B36', color: '#FFD700', padding: 8, borderRadius: 8, fontSize: 11, fontWeight: '900', textAlign: 'center' },
-  motionBox: { backgroundColor: '#130628', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#332255' },
-  motionLabel: { color: '#00FFFF', fontSize: 9.5, fontWeight: 'bold', marginBottom: 4 },
-  motionText: { color: '#FFF', fontSize: 14, fontWeight: '900', lineHeight: 20, marginBottom: 6 },
-  motionContext: { color: '#B0B0CC', fontSize: 10.5, fontStyle: 'italic' },
+  stageMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  roomBadge: { color: '#38BDF8', fontSize: 12, fontWeight: '900' },
+  cefrLevelPill: {
+    color: '#6EE7B7',
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 6,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  turnBanner: {
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.35)',
+    padding: 10,
+    borderRadius: 10,
+  },
+  turnBannerText: { color: '#7DD3FC', fontSize: 13, fontWeight: '800', textAlign: 'center' },
+  motionBox: {
+    backgroundColor: '#0B1120',
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  motionLabel: { color: '#10B981', fontSize: 11, fontWeight: '800', marginBottom: 6 },
+  motionText: { color: '#FFFFFF', fontSize: 17, fontWeight: '900', lineHeight: 25, marginBottom: 8 },
+  motionContext: { color: '#94A3B8', fontSize: 12.5, lineHeight: 19 },
+  tipBox: {
+    backgroundColor: 'rgba(245,158,11,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.3)',
+    borderRadius: 10,
+    padding: 11,
+  },
+  tipText: { color: '#FDE68A', fontSize: 12, lineHeight: 18 },
 
-  timerBox: { alignItems: 'center', paddingVertical: 14, gap: 8 },
-  timerLabel: { color: '#FFD700', fontSize: 10, fontWeight: '900' },
-  timerBig: { color: '#00FFFF', fontSize: 36, fontWeight: '900' },
-  skipPrepBtn: { backgroundColor: '#FF007F', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8 },
-  skipPrepText: { color: '#FFF', fontSize: 10.5, fontWeight: '900' },
-  stopTurnBtn: { backgroundColor: '#39FF14', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 },
-  stopTurnText: { color: '#000', fontSize: 11.5, fontWeight: '900' },
+  timerBox: { alignItems: 'center', paddingVertical: 16, gap: 10 },
+  timerLabel: { color: '#CBD5E1', fontSize: 12, fontWeight: '800' },
+  timerBig: { color: '#38BDF8', fontSize: 44, fontWeight: '900' },
+  skipPrepBtn: { backgroundColor: '#38BDF8', paddingHorizontal: 22, paddingVertical: 12, borderRadius: 10 },
+  skipPrepText: { color: '#020617', fontSize: 12.5, fontWeight: '900' },
+  stopTurnBtn: { backgroundColor: '#10B981', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12 },
+  stopTurnText: { color: '#020617', fontSize: 13, fontWeight: '900' },
 
-  gradingText: { color: '#00FFFF', fontSize: 11.5, fontWeight: 'bold', textAlign: 'center', lineHeight: 18 },
-  resultHeader: { color: '#FFD700', fontSize: 14, fontWeight: '900', textAlign: 'center' },
-  finalScoreText: { color: '#39FF14', fontSize: 28, fontWeight: '900', textAlign: 'center' },
-  scoreSplitRow: { flexDirection: 'row', gap: 10, marginVertical: 6 },
-  splitCell: { flex: 1, backgroundColor: '#130628', padding: 12, borderRadius: 10, alignItems: 'center' },
-  splitName: { color: '#FFF', fontSize: 11, fontWeight: 'bold', marginBottom: 4 },
-  splitVal: { color: '#00FFFF', fontSize: 18, fontWeight: '900' },
-  feedbackSummary: { color: '#E0E0F5', fontSize: 11, lineHeight: 16, backgroundColor: '#070212', padding: 10, borderRadius: 8 },
+  gradingTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '900', textAlign: 'center' },
+  gradingSub: { color: '#94A3B8', fontSize: 12.5, textAlign: 'center', maxWidth: 480, lineHeight: 19 },
+
+  resultEyebrow: { color: '#10B981', fontSize: 11, fontWeight: '800', textAlign: 'center' },
+  finalScoreText: { color: '#10B981', fontSize: 36, fontWeight: '900', textAlign: 'center' },
+  scoreSplitRow: { flexDirection: 'row', gap: 12 },
+  splitCell: {
+    flex: 1,
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    padding: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  splitName: { color: '#CBD5E1', fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  splitVal: { color: '#38BDF8', fontSize: 22, fontWeight: '900' },
+
+  blockLabel: { color: '#94A3B8', fontSize: 11, fontWeight: '800' },
+  transcriptBox: {
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 14,
+  },
+  transcriptText: { color: '#F8FAFC', fontSize: 13.5, fontStyle: 'italic', lineHeight: 20, marginTop: 6 },
+  audioReplayBox: {
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 14,
+  },
+
+  ipaCard: {
+    backgroundColor: 'rgba(56,189,248,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.35)',
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+  },
+  ipaHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  ipaTitle: { color: '#7DD3FC', fontSize: 12, fontWeight: '900' },
+  ipaScoreBadge: {
+    backgroundColor: 'rgba(56,189,248,0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  ipaScoreText: { color: '#BAE6FD', fontSize: 11, fontWeight: '900' },
+  ipaChipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  ipaWordChip: {
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.45)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  ipaWordText: { color: '#FDE68A', fontSize: 12, fontWeight: '700' },
+  ipaNoteText: { color: '#E2E8F0', fontSize: 12, lineHeight: 18 },
+
+  rubricSection: {
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 14,
+  },
+  rubricTopRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  rubricLabel: { color: '#CBD5E1', fontSize: 12, fontWeight: '700' },
+  rubricVal: { fontSize: 12, fontWeight: '900' },
+  progressTrack: {
+    height: 7,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  progressFill: { height: '100%', borderRadius: 999 },
+
+  feedbackBox: {
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.25)',
+    borderRadius: 12,
+    padding: 14,
+  },
+  feedbackSummary: { color: '#6EE7B7', fontSize: 12.5, lineHeight: 19, marginTop: 6 },
+
+  resultActionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 6 },
+  secondaryActionBtn: {
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryActionText: { color: '#E2E8F0', fontSize: 12.5, fontWeight: '800' },
 });
