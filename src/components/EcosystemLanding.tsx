@@ -35,6 +35,7 @@ export interface EcosystemLandingProps {
   onChangeLang?: (newLang: AppLang) => void;
   onSelectBattleMode: (mode: ArenaBattleMode) => void;
   onNavigateHub: () => void;
+  onNavigateEvents?: () => void;
   onNavigateCefrTest: () => void;
   onNavigateProfile: (studentCode?: string) => void;
 }
@@ -87,6 +88,7 @@ export default function EcosystemLanding({
   onChangeLang,
   onSelectBattleMode,
   onNavigateHub,
+  onNavigateEvents,
   onNavigateCefrTest,
   onNavigateProfile,
 }: EcosystemLandingProps) {
@@ -325,6 +327,14 @@ export default function EcosystemLanding({
                 ⚔️ {isVi ? 'Sảnh Đấu Trường' : 'Arena Hub'}
               </Text>
             </TouchableOpacity>
+
+            {onNavigateEvents && (
+              <TouchableOpacity style={styles.navBtn} onPress={onNavigateEvents}>
+                <Text style={styles.navBtnText}>
+                  📅 {isVi ? 'Sự Kiện & Ảnh Giải' : 'Events & Gallery'}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity style={styles.navBtn} onPress={onNavigateCefrTest}>
               <Text style={styles.navBtnText}>

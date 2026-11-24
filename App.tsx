@@ -17,6 +17,7 @@ import ArenaStageScreen from './src/modules/tournament-core/ArenaStageScreen';
 import LiveSpectatorModal from './src/modules/livestream-cast/LiveSpectatorModal';
 import CefrAssessmentScreen from './src/modules/cefr-engine/CefrAssessmentScreen';
 import PlayerProfileScreen from './src/modules/player-profile/PlayerProfileScreen';
+import EventsGalleryScreen from './src/modules/events-gallery/EventsGalleryScreen';
 import { AppLang } from './src/modules/i18n/translations';
 
 class ArenaErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; errorMsg: string }> {
@@ -47,7 +48,7 @@ class ArenaErrorBoundary extends Component<{ children: ReactNode }, { hasError: 
   }
 }
 
-type ArenaRoute = 'ECOSYSTEM' | 'HUB' | 'STAGE' | 'CEFR_TEST' | 'PROFILE' | 'LIVESTREAM';
+type ArenaRoute = 'ECOSYSTEM' | 'HUB' | 'STAGE' | 'CEFR_TEST' | 'PROFILE' | 'LIVESTREAM' | 'EVENTS';
 
 export default function App() {
   const [activeRoute, setActiveRoute] = useState<ArenaRoute>('ECOSYSTEM');
@@ -64,7 +65,6 @@ export default function App() {
       let resolvedTournament: TournamentItem | null = null;
 
       if (supabase) {
-        // 1. Tìm giải đấu đang mở khớp thể thức trong bảng tournaments
         const { data: existingList } = await supabase
           .from('tournaments')
           .select('*')
@@ -75,7 +75,6 @@ export default function App() {
         if (existingList && existingList.length > 0) {
           resolvedTournament = existingList[0] as TournamentItem;
         } else {
-          // 2. Nếu chưa có giải cho thể thức này, tạo mới 1 giải đấu chuẩn để tránh lỗi khóa ngoại DB
           const defaultTitle = {
             vi: `Đấu Trường ${battleMode} Chuẩn CEFR 2026`,
             en: `CEFR Official ${battleMode} Arena 2026`,
@@ -88,7 +87,7 @@ export default function App() {
                 mode: battleMode,
                 cefr_level: 'B1',
                 venue_type: 'ONLINE',
-                device_mode: battleMode === 'SOLO' ? 'SINGLE_DEVICE' : 'SINGLE_DEVICE',
+                device_mode: 'SINGLE_DEVICE',
                 status: 'OPEN',
               },
             ])
@@ -158,6 +157,11 @@ export default function App() {
                   ⚔️ {appLang === 'vi' ? 'Sảnh Giải Đấu' : 'Arena Hub'}
                 </Text>
               </TouchableOpacity>
+              <TouchableOpacity onPress={() => setActiveRoute('EVENTS')}>
+                <Text style={styles.quickNavLink}>
+                  📅 {appLang === 'vi' ? 'Sự Kiện & Ảnh Giải' : 'Events & Gallery'}
+                </Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => setActiveRoute('CEFR_TEST')}>
                 <Text style={styles.quickNavLink}>
                   🎙️ {appLang === 'vi' ? 'Kiểm Định CEFR' : 'CEFR Lab'}
@@ -178,6 +182,7 @@ export default function App() {
             onChangeLang={setAppLang}
             onSelectBattleMode={handleSelectBattleMode}
             onNavigateHub={() => setActiveRoute('HUB')}
+            onNavigateEvents={() => setActiveRoute('EVENTS')}
             onNavigateCefrTest={() => setActiveRoute('CEFR_TEST')}
             onNavigateProfile={(code) => {
               if (code) setProfileStudentCode(code);
@@ -197,6 +202,16 @@ export default function App() {
             onWatchLivestream={(match) => {
               setSelectedLiveMatch(match);
               setActiveRoute('LIVESTREAM');
+            }}
+          />
+        )}
+
+        {activeRoute === 'EVENTS' && (
+          <EventsGalleryScreen
+            onBack={() => setActiveRoute('ECOSYSTEM')}
+            onEnterTournamentStage={(tourney) => {
+              setSelectedTournament(tourney);
+              setActiveRoute('STAGE');
             }}
           />
         )}
