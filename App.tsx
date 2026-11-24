@@ -242,6 +242,7 @@ export default function App() {
           <PlayerProfileScreen
             initialStudentCode={profileStudentCode}
             onBack={() => setActiveRoute('ECOSYSTEM')}
+            onNavigateEvents={() => setActiveRoute('EVENTS')}
           />
         )}
       </View>

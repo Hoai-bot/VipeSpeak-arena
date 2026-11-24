@@ -1,11 +1,21 @@
 // E:\DuAnAI\VipeSpeak-arena\src\modules\player-profile\PlayerProfileScreen.tsx
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, TextInput } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  TextInput,
+  Platform,
+} from 'react-native';
 import { supabase } from '../../utils/supabase';
 
 interface Props {
   initialStudentCode?: string;
   onBack: () => void;
+  onNavigateEvents?: () => void;
 }
 
 function derivePeakFloorLevel(peakScore: number, fallbackCefr: string): string {
@@ -16,17 +26,64 @@ function derivePeakFloorLevel(peakScore: number, fallbackCefr: string): string {
   return fallbackCefr || 'B1';
 }
 
-export default function PlayerProfileScreen({ initialStudentCode = '', onBack }: Props) {
+// Nén ảnh Avatar thành vuông 200x200px trên trình duyệt
+function compressAvatarToBlob(file: File): Promise<{ blob: Blob; dataUrl: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new (window as any).Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const size = 200;
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const minSide = Math.min(img.width, img.height);
+        const sx = (img.width - minSide) / 2;
+        const sy = (img.height - minSide) / 2;
+        ctx?.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve({ blob, dataUrl });
+            else reject(new Error('Không thể nén ảnh đại diện'));
+          },
+          'image/jpeg',
+          0.85
+        );
+      };
+      img.onerror = reject;
+      img.src = ev.target?.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+export default function PlayerProfileScreen({
+  initialStudentCode = '',
+  onBack,
+  onNavigateEvents,
+}: Props) {
   const [searchCode, setSearchCode] = useState<string>(initialStudentCode);
   const [profileData, setProfileData] = useState<any>(null);
   const [matchHistory, setMatchHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
+
+  // Avatar & Upload state
+  const [avatarUrl, setAvatarUrl] = useState<string>('');
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState<boolean>(false);
+  const [avatarStatusMsg, setAvatarStatusMsg] = useState<string>('');
+
+  const avatarCameraRef = useRef<any>(null);
+  const avatarFileRef = useRef<any>(null);
 
   const loadPlayerProfileAndMatches = async (codeToLoad: string) => {
     const cleanCode = codeToLoad.trim().toUpperCase();
     if (!cleanCode || !supabase) return;
 
     setLoading(true);
+    setAvatarStatusMsg('');
     try {
       const [profRes, matchesRes] = await Promise.all([
         supabase.from('profiles').select('*').ilike('student_id', cleanCode).maybeSingle(),
@@ -40,6 +97,18 @@ export default function PlayerProfileScreen({ initialStudentCode = '', onBack }:
 
       setProfileData(profRes.data || null);
       setMatchHistory(matchesRes.data || []);
+
+      // Tải Avatar đã lưu của thí sinh từ Supabase Storage (submissions/avatars/<MSSV>.jpg)
+      const { data: pubUrlObj } = supabase.storage
+        .from('submissions')
+        .getPublicUrl(`avatars/${cleanCode}.jpg`);
+      if (pubUrlObj?.publicUrl) {
+        setAvatarUrl(`${pubUrlObj.publicUrl}?t=${Date.now()}`);
+      } else if (profRes.data?.avatar_url) {
+        setAvatarUrl(profRes.data.avatar_url);
+      } else {
+        setAvatarUrl('');
+      }
     } finally {
       setLoading(false);
     }
@@ -51,6 +120,42 @@ export default function PlayerProfileScreen({ initialStudentCode = '', onBack }:
     }
   }, [initialStudentCode]);
 
+  const handleAvatarSelected = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const cleanCode = searchCode.trim().toUpperCase();
+    if (!cleanCode) {
+      setAvatarStatusMsg('⚠️ Vui lòng nhập MSSV vào ô tra cứu trước khi tải ảnh đại diện!');
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    setAvatarStatusMsg('⏳ Đang nén và lưu ảnh đại diện SPEAK-ID...');
+    try {
+      const { blob, dataUrl } = await compressAvatarToBlob(fileList[0]);
+      setAvatarUrl(dataUrl);
+
+      if (supabase) {
+        const storagePath = `avatars/${cleanCode}.jpg`;
+        const { error: upErr } = await supabase.storage.from('submissions').upload(storagePath, blob, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        });
+
+        if (!upErr) {
+          const { data: urlObj } = supabase.storage.from('submissions').getPublicUrl(storagePath);
+          if (urlObj?.publicUrl) {
+            setAvatarUrl(`${urlObj.publicUrl}?t=${Date.now()}`);
+          }
+        }
+      }
+      setAvatarStatusMsg(`✅ Đã cập nhật ảnh đại diện cho SPEAK-${cleanCode}!`);
+    } catch (err: any) {
+      setAvatarStatusMsg(`❌ Lỗi tải ảnh đại diện: ${err?.message || 'Thử lại sau'}`);
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
   const cleanSearch = searchCode.trim().toUpperCase();
   const totalMatches = matchHistory.length;
   const winsCount = matchHistory.filter(
@@ -58,7 +163,6 @@ export default function PlayerProfileScreen({ initialStudentCode = '', onBack }:
   ).length;
   const winRate = totalMatches > 0 ? Math.round((winsCount / totalMatches) * 100) : 0;
 
-  // Tính Đỉnh Năng Lực (Peak Score) & Khóa sàn CEFR
   const allPlayerScores = matchHistory.map((m) => {
     const isP2 = (m.player2_code || '').toUpperCase() === cleanSearch;
     return Number(isP2 ? m.player2_score ?? m.final_score ?? 0 : m.player1_score ?? m.final_score ?? 0);
@@ -68,6 +172,10 @@ export default function PlayerProfileScreen({ initialStudentCode = '', onBack }:
   const hasDebateMatch = matchHistory.some((m) => m.mode === 'DEBATE');
   const speakIdBadge = cleanSearch ? `SPEAK-${cleanSearch}` : 'SPEAK-ID-2026';
 
+  const displayName =
+    profileData?.full_name || matchHistory[0]?.player1_name || cleanSearch || 'Thí sinh VipeSpeak Arena';
+  const fallbackInitial = displayName.charAt(0).toUpperCase();
+
   return (
     <View style={styles.container}>
       <View style={styles.innerMax}>
@@ -76,9 +184,15 @@ export default function PlayerProfileScreen({ initialStudentCode = '', onBack }:
             <Text style={styles.backText}>← TRANG CHỦ</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>🪪 HỘ CHIẾU NĂNG LỰC SPEAK-ID & LỊCH SỬ</Text>
-          <View style={styles.verifiedTag}>
-            <Text style={styles.verifiedTagText}>CEFR FLOOR LOCK</Text>
-          </View>
+          {onNavigateEvents ? (
+            <TouchableOpacity style={styles.eventsLinkBtn} onPress={onNavigateEvents}>
+              <Text style={styles.eventsLinkText}>📅 Sự Kiện & Ảnh Giải</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.verifiedTag}>
+              <Text style={styles.verifiedTagText}>CEFR FLOOR LOCK</Text>
+            </View>
+          )}
         </View>
 
         {/* Thanh tra cứu MSSV */}
@@ -100,31 +214,101 @@ export default function PlayerProfileScreen({ initialStudentCode = '', onBack }:
           </TouchableOpacity>
         </View>
 
+        {avatarStatusMsg ? (
+          <View style={styles.toastBanner}>
+            <Text style={styles.toastText}>{avatarStatusMsg}</Text>
+          </View>
+        ) : null}
+
         <ScrollView contentContainerStyle={{ paddingBottom: 50 }}>
           {loading ? (
             <ActivityIndicator size="large" color="#10B981" style={{ marginVertical: 30 }} />
           ) : (
             <>
-              {/* THẺ HỘ CHIẾU SPEAK-ID */}
+              {/* THẺ HỘ CHIẾU SPEAK-ID CÓ AVATAR CHỤP CAMERA / TẢI ẢNH */}
               <View style={styles.profileCard}>
                 <View style={styles.profileTop}>
-                  <View style={{ flex: 1 }}>
-                    <View style={styles.idPillRow}>
-                      <View style={styles.speakIdPill}>
-                        <Text style={styles.speakIdPillText}>{speakIdBadge}</Text>
+                  <View style={styles.identityLeftRow}>
+                    {/* Khung Avatar tròn + Nút Chụp Camera / Tải Ảnh */}
+                    <View style={styles.avatarColumn}>
+                      <View style={styles.avatarRing}>
+                        {avatarUrl && Platform.OS === 'web' ? (
+                          // @ts-ignore
+                          <img
+                            src={avatarUrl}
+                            alt="Avatar SPEAK-ID"
+                            onError={() => setAvatarUrl('')}
+                            style={{
+                              width: 78,
+                              height: 78,
+                              borderRadius: 39,
+                              objectFit: 'cover',
+                            }}
+                          />
+                        ) : (
+                          <View style={styles.avatarFallback}>
+                            <Text style={styles.avatarFallbackText}>{fallbackInitial}</Text>
+                          </View>
+                        )}
                       </View>
-                      {hasVarVerified && (
-                        <View style={styles.varPill}>
-                          <Text style={styles.varPillText}>🛡️ VAR VERIFIED</Text>
-                        </View>
+
+                      {Platform.OS === 'web' && (
+                        <>
+                          {/* @ts-ignore - Chụp selfie qua camera trước trên điện thoại */}
+                          <input
+                            ref={avatarCameraRef}
+                            type="file"
+                            accept="image/*"
+                            capture="user"
+                            style={{ display: 'none' }}
+                            onChange={(e: any) => handleAvatarSelected(e.target.files)}
+                          />
+                          {/* @ts-ignore - Tải ảnh từ thư viện máy */}
+                          <input
+                            ref={avatarFileRef}
+                            type="file"
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            onChange={(e: any) => handleAvatarSelected(e.target.files)}
+                          />
+                        </>
                       )}
+
+                      <View style={styles.avatarBtnPair}>
+                        <TouchableOpacity
+                          style={styles.avatarMiniBtn}
+                          disabled={isUploadingAvatar}
+                          onPress={() => avatarCameraRef.current?.click()}
+                        >
+                          <Text style={styles.avatarMiniBtnText}>📷 Chụp</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.avatarMiniBtnSky}
+                          disabled={isUploadingAvatar}
+                          onPress={() => avatarFileRef.current?.click()}
+                        >
+                          <Text style={styles.avatarMiniBtnSkyText}>🖼️ Tải ảnh</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                    <Text style={styles.playerName}>
-                      {profileData?.full_name || matchHistory[0]?.player1_name || cleanSearch || 'Thí sinh VipeSpeak Arena'}
-                    </Text>
-                    <Text style={styles.playerSub}>
-                      MSSV: {cleanSearch || 'N/A'} • 🏅 {profileData?.badge_title || 'Arena Competitor'}
-                    </Text>
+
+                    {/* Thông tin định danh */}
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.idPillRow}>
+                        <View style={styles.speakIdPill}>
+                          <Text style={styles.speakIdPillText}>{speakIdBadge}</Text>
+                        </View>
+                        {hasVarVerified && (
+                          <View style={styles.varPill}>
+                            <Text style={styles.varPillText}>🛡️ VAR VERIFIED</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.playerName}>{displayName}</Text>
+                      <Text style={styles.playerSub}>
+                        MSSV: {cleanSearch || 'N/A'} • 🏅 {profileData?.badge_title || 'Arena Competitor'}
+                      </Text>
+                    </View>
                   </View>
 
                   <View style={styles.cefrBadgeBox}>
@@ -136,7 +320,10 @@ export default function PlayerProfileScreen({ initialStudentCode = '', onBack }:
                 {/* Khóa Sàn Năng Lực (Peak CEFR Floor) */}
                 <View style={styles.floorLockBar}>
                   <Text style={styles.floorLockText}>
-                    🔒 Đỉnh năng lực: <Text style={{ color: '#10B981', fontWeight: '900' }}>{peakScore}/100đ</Text>  •  Mức sàn bảo vệ: <Text style={{ color: '#7DD3FC', fontWeight: '900' }}>{derivePeakFloorLevel(peakScore, profileData?.current_cefr || 'B1')}</Text>
+                    🔒 Đỉnh năng lực: <Text style={{ color: '#10B981', fontWeight: '900' }}>{peakScore}/100đ</Text>  •  Mức sàn bảo vệ:{' '}
+                    <Text style={{ color: '#7DD3FC', fontWeight: '900' }}>
+                      {derivePeakFloorLevel(peakScore, profileData?.current_cefr || 'B1')}
+                    </Text>
                   </Text>
                 </View>
 
@@ -274,6 +461,15 @@ const styles = StyleSheet.create({
   },
   backText: { color: '#CBD5E1', fontSize: 11, fontWeight: '800' },
   headerTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '900', textAlign: 'center', flex: 1 },
+  eventsLinkBtn: {
+    backgroundColor: 'rgba(167,139,250,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.45)',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  eventsLinkText: { color: '#DDD6FE', fontSize: 11, fontWeight: '800' },
   verifiedTag: {
     backgroundColor: 'rgba(56,189,248,0.15)',
     borderWidth: 1,
@@ -284,7 +480,7 @@ const styles = StyleSheet.create({
   },
   verifiedTagText: { color: '#7DD3FC', fontSize: 10, fontWeight: '800' },
 
-  searchRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  searchRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   searchInput: {
     flex: 1,
     backgroundColor: '#111827',
@@ -304,6 +500,16 @@ const styles = StyleSheet.create({
   },
   searchBtnText: { color: '#020617', fontSize: 12, fontWeight: '900' },
 
+  toastBanner: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.45)',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  toastText: { color: '#6EE7B7', fontSize: 12, fontWeight: '700', textAlign: 'center' },
+
   profileCard: {
     backgroundColor: '#111827',
     borderRadius: 18,
@@ -313,7 +519,61 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     gap: 12,
   },
-  profileTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+  profileTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  identityLeftRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    flex: 1,
+    minWidth: 260,
+  },
+  avatarColumn: { alignItems: 'center', gap: 6 },
+  avatarRing: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    borderWidth: 2.5,
+    borderColor: '#10B981',
+    padding: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0B1120',
+  },
+  avatarFallback: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: '#1E293B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarFallbackText: { color: '#10B981', fontSize: 28, fontWeight: '900' },
+  avatarBtnPair: { flexDirection: 'row', gap: 5 },
+  avatarMiniBtn: {
+    backgroundColor: 'rgba(16,185,129,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.45)',
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  avatarMiniBtnText: { color: '#6EE7B7', fontSize: 10, fontWeight: '800' },
+  avatarMiniBtnSky: {
+    backgroundColor: 'rgba(56,189,248,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.45)',
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  avatarMiniBtnSkyText: { color: '#7DD3FC', fontSize: 10, fontWeight: '800' },
+
   idPillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 },
   speakIdPill: {
     backgroundColor: 'rgba(16,185,129,0.16)',
