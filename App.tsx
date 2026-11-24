@@ -193,6 +193,10 @@ export default function App() {
             lang={appLang}
             onChangeLang={setAppLang}
             onSelectBattleMode={handleSelectBattleMode}
+            onNavigateDoubles={(pairMode) => {
+              if (pairMode) setDoublesInitialMode(pairMode);
+              setActiveRoute('DOUBLES');
+            }}
             onNavigateHub={() => setActiveRoute('HUB')}
             onNavigateEvents={() => setActiveRoute('EVENTS')}
             onNavigateCefrTest={() => setActiveRoute('CEFR_TEST')}

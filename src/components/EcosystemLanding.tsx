@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { supabase } from '../utils/supabase';
 import { AppLang } from '../modules/i18n/translations';
+import { PairBattleMode } from '../modules/tournament-core/DoublesPairScreen';
 
 export type ArenaBattleMode = 'SOLO' | 'RELAY' | 'ROLEPLAY' | 'DEBATE';
 
@@ -34,6 +35,7 @@ export interface EcosystemLandingProps {
   lang?: AppLang;
   onChangeLang?: (newLang: AppLang) => void;
   onSelectBattleMode: (mode: ArenaBattleMode) => void;
+  onNavigateDoubles?: (mode?: PairBattleMode) => void;
   onNavigateHub: () => void;
   onNavigateEvents?: () => void;
   onNavigateCefrTest: () => void;
@@ -87,6 +89,7 @@ export default function EcosystemLanding({
   lang = 'vi',
   onChangeLang,
   onSelectBattleMode,
+  onNavigateDoubles,
   onNavigateHub,
   onNavigateEvents,
   onNavigateCefrTest,
@@ -131,7 +134,7 @@ export default function EcosystemLanding({
     },
     {
       mode: 'RELAY',
-      badge: 'TEAM • RELAY',
+      badge: 'TEAM 2VS2 • RELAY',
       icon: '⚡',
       titleVi: 'TIẾP SỨC RELAY',
       titleEn: 'RELAY ARENA',
@@ -146,7 +149,7 @@ export default function EcosystemLanding({
     },
     {
       mode: 'ROLEPLAY',
-      badge: 'PAIR • DIALOGUE',
+      badge: 'PAIR 2VS2 • DIALOGUE',
       icon: '🤝',
       titleVi: 'NHẬP VAI ROLEPLAY',
       titleEn: 'ROLEPLAY ARENA',
@@ -328,6 +331,17 @@ export default function EcosystemLanding({
               </Text>
             </TouchableOpacity>
 
+            <TouchableOpacity
+              style={[styles.navBtn, styles.navBtnPair]}
+              onPress={() =>
+                onNavigateDoubles ? onNavigateDoubles('RELAY') : onSelectBattleMode('RELAY')
+              }
+            >
+              <Text style={styles.navBtnPairText}>
+                🤝 {isVi ? 'Ghép Cặp Relay / Roleplay' : 'Pair Relay / Roleplay'}
+              </Text>
+            </TouchableOpacity>
+
             {onNavigateEvents && (
               <TouchableOpacity style={styles.navBtn} onPress={onNavigateEvents}>
                 <Text style={styles.navBtnText}>
@@ -339,12 +353,6 @@ export default function EcosystemLanding({
             <TouchableOpacity style={styles.navBtn} onPress={onNavigateCefrTest}>
               <Text style={styles.navBtnText}>
                 🎙️ {isVi ? 'AI Kiểm Định CEFR' : 'AI CEFR Lab'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.navBtn} onPress={() => onSelectBattleMode('ROLEPLAY')}>
-              <Text style={styles.navBtnText}>
-                🤝 {isVi ? 'Ghép Cặp Roleplay' : 'Pair Roleplay'}
               </Text>
             </TouchableOpacity>
 
@@ -402,9 +410,14 @@ export default function EcosystemLanding({
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.secondaryCta} onPress={onNavigateHub}>
+          <TouchableOpacity
+            style={styles.secondaryCta}
+            onPress={() =>
+              onNavigateDoubles ? onNavigateDoubles('RELAY') : onNavigateHub()
+            }
+          >
             <Text style={styles.secondaryCtaText}>
-              🏟️ {isVi ? 'VÀO SẢNH GIẢI ĐẤU & PHÒNG THI LỚP' : 'ENTER TOURNAMENT & CLASS HUB'}
+              🤝 {isVi ? 'GHÉP CẶP ĐẤU ĐÔI RELAY / ROLEPLAY' : 'CEFR PAIR MATCHMAKING'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -421,45 +434,61 @@ export default function EcosystemLanding({
           </Text>
           <Text style={styles.sectionDesc}>
             {isVi
-              ? 'Bấm trực tiếp vào một trong 4 thể thức bên dưới để bước vào sân khấu thi đấu ngay lập tức'
-              : 'Select any of the 4 competition formats below to enter the stage immediately'}
+              ? 'Bấm trực tiếp vào một trong 4 thể thức bên dưới để vào sân khấu hoặc ghép cặp đồng đội chuẩn CEFR'
+              : 'Select any of the 4 formats below to enter the stage or pair up by CEFR level'}
           </Text>
         </View>
 
         <View style={styles.grid4}>
-          {battleModes.map((item) => (
-            <View
-              key={item.mode}
-              style={[styles.modeCard, { borderColor: `${item.borderColor}55` }]}
-            >
-              <View>
-                <View style={styles.modeCardTop}>
-                  <Text style={styles.modeIcon}>{item.icon}</Text>
-                  <View style={styles.modeBadge}>
-                    <Text style={styles.modeBadgeText}>{item.badge}</Text>
+          {battleModes.map((item) => {
+            const isPairMode = item.mode === 'RELAY' || item.mode === 'ROLEPLAY';
+            return (
+              <View
+                key={item.mode}
+                style={[styles.modeCard, { borderColor: `${item.borderColor}55` }]}
+              >
+                <View>
+                  <View style={styles.modeCardTop}>
+                    <Text style={styles.modeIcon}>{item.icon}</Text>
+                    <View style={styles.modeBadge}>
+                      <Text style={styles.modeBadgeText}>{item.badge}</Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.modeTitle}>{isVi ? item.titleVi : item.titleEn}</Text>
+                  <Text style={styles.modeDesc}>{isVi ? item.descVi : item.descEn}</Text>
+
+                  <View style={styles.modeAuditBox}>
+                    <Text style={styles.modeAuditText}>
+                      {isVi ? item.auditVi : item.auditEn}
+                    </Text>
                   </View>
                 </View>
 
-                <Text style={styles.modeTitle}>{isVi ? item.titleVi : item.titleEn}</Text>
-                <Text style={styles.modeDesc}>{isVi ? item.descVi : item.descEn}</Text>
+                <View style={{ gap: 8, marginTop: 16 }}>
+                  <TouchableOpacity
+                    style={[styles.modeBtn, { backgroundColor: item.accentColor }]}
+                    onPress={() => onSelectBattleMode(item.mode)}
+                  >
+                    <Text style={styles.modeBtnText}>
+                      {isVi ? `VÀO ĐẤU TRƯỜNG ${item.mode} ➔` : `ENTER ${item.mode} ARENA ➔`}
+                    </Text>
+                  </TouchableOpacity>
 
-                <View style={styles.modeAuditBox}>
-                  <Text style={styles.modeAuditText}>
-                    {isVi ? item.auditVi : item.auditEn}
-                  </Text>
+                  {isPairMode && onNavigateDoubles && (
+                    <TouchableOpacity
+                      style={[styles.pairSubBtn, { borderColor: `${item.accentColor}88` }]}
+                      onPress={() => onNavigateDoubles(item.mode as PairBattleMode)}
+                    >
+                      <Text style={[styles.pairSubBtnText, { color: item.accentColor }]}>
+                        🤝 {isVi ? `Ghép Cặp ${item.mode} Chuẩn CEFR` : `Pair ${item.mode} by CEFR`}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
-
-              <TouchableOpacity
-                style={[styles.modeBtn, { backgroundColor: item.accentColor }]}
-                onPress={() => onSelectBattleMode(item.mode)}
-              >
-                <Text style={styles.modeBtnText}>
-                  {isVi ? `VÀO ĐẤU TRƯỜNG ${item.mode} ➔` : `ENTER ${item.mode} ARENA ➔`}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ))}
+            );
+          })}
         </View>
       </View>
 
@@ -801,6 +830,12 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(16,185,129,0.4)',
   },
   navBtnActiveText: { color: '#6EE7B7', fontSize: 12, fontWeight: '800' },
+  navBtnPair: {
+    backgroundColor: 'rgba(167,139,250,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.4)',
+  },
+  navBtnPairText: { color: '#DDD6FE', fontSize: 12, fontWeight: '800' },
   navBtnText: { color: '#CBD5E1', fontSize: 12, fontWeight: '600' },
   navBtnVar: {
     backgroundColor: 'rgba(56,189,248,0.12)',
@@ -901,8 +936,16 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   modeAuditText: { color: '#94A3B8', fontSize: 11, fontWeight: '600' },
-  modeBtn: { marginTop: 16, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  modeBtn: { paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
   modeBtnText: { color: '#020617', fontSize: 12, fontWeight: '900', letterSpacing: 0.4 },
+  pairSubBtn: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  pairSubBtnText: { fontSize: 11.5, fontWeight: '800' },
   passportContainer: {
     backgroundColor: '#111827',
     borderWidth: 1,
