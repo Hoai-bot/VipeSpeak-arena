@@ -14,6 +14,7 @@ import { supabase } from './src/utils/supabase';
 import EcosystemLanding, { ArenaBattleMode } from './src/components/EcosystemLanding';
 import ArenaHubScreen, { TournamentItem, LiveMatchItem } from './src/modules/tournament-core/ArenaHubScreen';
 import ArenaStageScreen from './src/modules/tournament-core/ArenaStageScreen';
+import DoublesPairScreen, { PairBattleMode } from './src/modules/tournament-core/DoublesPairScreen';
 import LiveSpectatorModal from './src/modules/livestream-cast/LiveSpectatorModal';
 import CefrAssessmentScreen from './src/modules/cefr-engine/CefrAssessmentScreen';
 import PlayerProfileScreen from './src/modules/player-profile/PlayerProfileScreen';
@@ -48,7 +49,7 @@ class ArenaErrorBoundary extends Component<{ children: ReactNode }, { hasError: 
   }
 }
 
-type ArenaRoute = 'ECOSYSTEM' | 'HUB' | 'STAGE' | 'CEFR_TEST' | 'PROFILE' | 'LIVESTREAM' | 'EVENTS';
+type ArenaRoute = 'ECOSYSTEM' | 'HUB' | 'STAGE' | 'CEFR_TEST' | 'PROFILE' | 'LIVESTREAM' | 'EVENTS' | 'DOUBLES';
 
 export default function App() {
   const [activeRoute, setActiveRoute] = useState<ArenaRoute>('ECOSYSTEM');
@@ -56,6 +57,7 @@ export default function App() {
   const [selectedTournament, setSelectedTournament] = useState<TournamentItem | null>(null);
   const [selectedLiveMatch, setSelectedLiveMatch] = useState<LiveMatchItem | null>(null);
   const [profileStudentCode, setProfileStudentCode] = useState<string>('');
+  const [doublesInitialMode, setDoublesInitialMode] = useState<PairBattleMode>('RELAY');
   const [isLaunchingArena, setIsLaunchingArena] = useState<boolean>(false);
 
   // Mở trực tiếp 1 trong 4 thể thức (SOLO / RELAY / ROLEPLAY / DEBATE) với bản ghi Tournament thực trên Supabase
@@ -157,6 +159,16 @@ export default function App() {
                   ⚔️ {appLang === 'vi' ? 'Sảnh Giải Đấu' : 'Arena Hub'}
                 </Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  setDoublesInitialMode('RELAY');
+                  setActiveRoute('DOUBLES');
+                }}
+              >
+                <Text style={[styles.quickNavLink, { color: '#6EE7B7' }]}>
+                  🤝 {appLang === 'vi' ? 'Ghép Cặp Relay/Roleplay' : 'Doubles Match'}
+                </Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => setActiveRoute('EVENTS')}>
                 <Text style={styles.quickNavLink}>
                   📅 {appLang === 'vi' ? 'Sự Kiện & Ảnh Giải' : 'Events & Gallery'}
@@ -202,6 +214,28 @@ export default function App() {
             onWatchLivestream={(match) => {
               setSelectedLiveMatch(match);
               setActiveRoute('LIVESTREAM');
+            }}
+          />
+        )}
+
+        {activeRoute === 'DOUBLES' && (
+          <DoublesPairScreen
+            initialMode={doublesInitialMode}
+            onBack={() => setActiveRoute('ECOSYSTEM')}
+            onLaunchTeamMatch={(teamData) => {
+              setSelectedTournament({
+                id: `team-${teamData.teamCode.toLowerCase()}`,
+                title: {
+                  vi: `Đấu Đội ${teamData.mode} (${teamData.player1.fullName} & ${teamData.player2.fullName}) • Bảng ${teamData.divisionCefr}`,
+                  en: `${teamData.mode} Team Match (${teamData.teamCode}) • Division ${teamData.divisionCefr}`,
+                },
+                mode: teamData.mode,
+                cefr_level: teamData.divisionCefr,
+                venue_type: 'ONLINE',
+                device_mode: 'SINGLE_DEVICE',
+                status: 'OPEN',
+              } as unknown as TournamentItem);
+              setActiveRoute('STAGE');
             }}
           />
         )}
