@@ -1,4 +1,4 @@
-// src/modules/cefr-engine/CefrAssessmentScreen.tsx
+// E:\DuAnAI\VipeSpeak-arena\src\modules\cefr-engine\CefrAssessmentScreen.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, TextInput } from 'react-native';
 import { supabase } from '../../utils/supabase';
@@ -25,7 +25,8 @@ const CEFR_EXAM_PARTS: AssessmentPart[] = [
     subtitle: 'Kiểm tra ngữ âm cơ bản & độ rõ âm tiết',
     stationType: 'STATION_1',
     targetLevel: 'A2',
-    promptEn: 'Please read aloud clearly: "Technology connects students across the world and creates better career opportunities."',
+    promptEn:
+      'Please read aloud clearly: "Technology connects students across the world and creates better career opportunities."',
     guideVi: 'Đọc to, tròn vành rõ chữ câu tiếng Anh phía trên với ngữ điệu tự nhiên.',
   },
   {
@@ -34,7 +35,8 @@ const CEFR_EXAM_PARTS: AssessmentPart[] = [
     subtitle: 'Xử lý tình huống & Diễn đạt mạch lạc (B1–B2)',
     stationType: 'STATION_2',
     targetLevel: 'B2',
-    promptEn: 'Describe a useful digital tool or website you frequently use for studying or working, and explain why it is effective.',
+    promptEn:
+      'Describe a useful digital tool or website you frequently use for studying or working, and explain why it is effective.',
     guideVi: 'Trình bày câu trả lời từ 25–45 giây, nêu rõ tên công cụ, lợi ích và ví dụ thực tế.',
   },
   {
@@ -43,18 +45,19 @@ const CEFR_EXAM_PARTS: AssessmentPart[] = [
     subtitle: 'Tư duy phản biện & Lập luận nâng cao (C1–C2)',
     stationType: 'STATION_4',
     targetLevel: 'C1',
-    promptEn: 'Should universities integrate AI speaking examiners into official graduation exams? Discuss both benefits and ethical risks.',
+    promptEn:
+      'Should universities integrate AI speaking examiners into official graduation exams? Discuss both benefits and ethical risks.',
     guideVi: 'Nêu quan điểm phản biện đa chiều, sử dụng từ nối học thuật (furthermore, however, consequently...).',
   },
 ];
 
 function mapScoreToCefr(avgScore: number): { level: string; title: string; color: string } {
-  if (avgScore >= 92) return { level: 'C2', title: 'Mastery / Native-Like Speaker', color: '#00FFFF' };
-  if (avgScore >= 82) return { level: 'C1', title: 'Advanced Academic & Debate Speaker', color: '#39FF14' };
-  if (avgScore >= 70) return { level: 'B2', title: 'Upper-Intermediate Confident Speaker', color: '#FFD700' };
-  if (avgScore >= 56) return { level: 'B1', title: 'Intermediate Communicator', color: '#FF9900' };
-  if (avgScore >= 40) return { level: 'A2', title: 'Elementary Everyday Speaker', color: '#FF007F' };
-  return { level: 'A1', title: 'Beginner Foundation Speaker', color: '#FF0055' };
+  if (avgScore >= 92) return { level: 'C2', title: 'Mastery / Native-Like Speaker', color: '#38BDF8' };
+  if (avgScore >= 82) return { level: 'C1', title: 'Advanced Academic & Debate Speaker', color: '#10B981' };
+  if (avgScore >= 70) return { level: 'B2', title: 'Upper-Intermediate Confident Speaker', color: '#34D399' };
+  if (avgScore >= 56) return { level: 'B1', title: 'Intermediate Communicator', color: '#F59E0B' };
+  if (avgScore >= 40) return { level: 'A2', title: 'Elementary Everyday Speaker', color: '#A78BFA' };
+  return { level: 'A1', title: 'Beginner Foundation Speaker', color: '#F87171' };
 }
 
 export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfile }: Props) {
@@ -70,7 +73,19 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
   const [errorMsg, setErrorMsg] = useState<string>('');
 
   const [partResults, setPartResults] = useState<
-    { part: number; score: number; transcript: string; feedback: string; criteria: any; wpm?: number }[]
+    {
+      part: number;
+      score: number;
+      transcript: string;
+      feedback: string;
+      criteria: any;
+      wpm?: number;
+      phonemeAnalysis?: {
+        phonemeAccuracyScore?: number;
+        ipaHighlight?: string[];
+        stressAndEndingNote?: string;
+      } | null;
+    }[]
   >([]);
 
   const mediaRecorderRef = useRef<any>(null);
@@ -180,7 +195,7 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
       if (peakVolumeRef.current < 3) {
         setIsGrading(false);
         setErrorMsg(
-          '⚠️ Micro không thu được tiếng nói (tín hiệu âm thanh bằng 0). Hãy kiểm tra biểu tượng Micro trên thanh địa chỉ trình duyệt hoặc Cài đặt âm thanh Windows rồi thu lại!'
+          '⚠️ Micro không thu được tiếng nói (tín hiệu âm thanh bằng 0). Hãy kiểm tra biểu tượng Micro trên thanh địa chỉ trình duyệt rồi thu lại!'
         );
         return;
       }
@@ -216,7 +231,7 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
           data = {
             score: simScore,
             transcript: `[Local Preview Audio • ${recordedDuration}s] ${currentPart.promptEn}`,
-            feedback: `Đánh giá thử nghiệm cục bộ (${recordedDuration}s): Phát âm rõ ràng, ngữ điệu ổn định. Khi triển khai lên Vercel sẽ dùng AI chấm trực tiếp từng âm vị.`,
+            feedback: `Đánh giá thử nghiệm cục bộ (${recordedDuration}s): Phát âm rõ ràng, ngữ điệu ổn định.`,
             criteria: {
               pronunciation: simScore,
               fluency: simScore - 2,
@@ -229,11 +244,12 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
 
         const newRecord = {
           part: currentPart.partNumber,
-          score: Number(data?.score || 0),
+          score: Math.round(Number(data?.score || 0)),
           transcript: data?.transcript || '',
           feedback: data?.feedback || '',
           criteria: data?.criteria || { pronunciation: 70, fluency: 70, vocabulary: 70, grammar: 70 },
           wpm: data?.speechMetrics?.wpm || 115,
+          phonemeAnalysis: data?.phonemeAnalysis || null,
         };
 
         const updatedList = [...partResults, newRecord];
@@ -315,224 +331,383 @@ export default function CefrAssessmentScreen({ onBack, onCompletedNavigateProfil
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
-          <Text style={styles.backText}>🔙 SẢNH GIẢI ĐẤU</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>🎓 ĐÁNH GIÁ NĂNG LỰC NÓI CHUẨN CEFR</Text>
-        <View style={{ width: 70 }} />
-      </View>
-
-      {errorMsg ? (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{errorMsg}</Text>
+      <View style={styles.innerMax}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+            <Text style={styles.backText}>← TRANG CHỦ</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>🎓 KIỂM ĐỊNH NĂNG LỰC NÓI CHUẨN CEFR</Text>
+          <View style={styles.badgeTag}>
+            <Text style={styles.badgeTagText}>IPA • QR VERIFIED</Text>
+          </View>
         </View>
-      ) : null}
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        {step === 'INTRO' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>📋 BÀI KIỂM TRA XẾP HẠNG CEFR (A1 – C2)</Text>
-            <Text style={styles.cardSub}>
-              Bài thi gồm 3 phần liên tiếp để xác định bảng đấu phù hợp và cấp Chứng nhận điện tử có mã QR:
-            </Text>
-
-            <View style={styles.partPreviewList}>
-              {CEFR_EXAM_PARTS.map((p) => (
-                <View key={p.partNumber} style={styles.partPreviewItem}>
-                  <Text style={styles.partPreviewTitle}>{p.title}</Text>
-                  <Text style={styles.partPreviewSub}>{p.subtitle}</Text>
-                </View>
-              ))}
-            </View>
-
-            <TextInput
-              style={styles.input}
-              placeholder="Họ và tên thí sinh (*)"
-              placeholderTextColor="#666688"
-              value={studentName}
-              onChangeText={setStudentName}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Mã số sinh viên (MSSV) (*)"
-              placeholderTextColor="#666688"
-              value={studentCode}
-              onChangeText={setStudentCode}
-            />
-
-            <TouchableOpacity style={styles.primaryBtn} onPress={handleStartExam}>
-              <Text style={styles.primaryBtnText}>🚀 BẮT ĐẦU KIỂM TRA 3 PHẦN</Text>
-            </TouchableOpacity>
+        {errorMsg ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorText}>{errorMsg}</Text>
           </View>
-        )}
+        ) : null}
 
-        {step === 'TESTING' && currentPart && (
-          <View style={styles.card}>
-            <View style={styles.progressRow}>
-              <Text style={styles.stepPill}>
-                PHẦN {currentPart.partNumber} / {CEFR_EXAM_PARTS.length}
+        <ScrollView contentContainerStyle={{ paddingBottom: 50 }}>
+          {step === 'INTRO' && (
+            <View style={styles.card}>
+              <Text style={styles.eyebrow}>🔬 CAMBRIDGE CEFR & GEMINI IPA PLACEMENT</Text>
+              <Text style={styles.cardTitle}>Bài Kiểm Tra Xếp Hạng Năng Lực Nói (A1 – C2)</Text>
+              <Text style={styles.cardSub}>
+                Hoàn thành 3 phần đánh giá liên tiếp để xác định cấp độ CEFR thực tế, phân tích âm vị IPA và cấp Hộ chiếu điện tử có mã QR xác thực:
               </Text>
-              <Text style={styles.levelTargetPill}>Mức chuẩn: {currentPart.targetLevel}</Text>
-            </View>
 
-            <Text style={styles.partHeading}>{currentPart.title}</Text>
-            <Text style={styles.partGuide}>{currentPart.guideVi}</Text>
-
-            <View style={styles.promptBox}>
-              <Text style={styles.promptText}>{currentPart.promptEn}</Text>
-            </View>
-
-            {isGrading ? (
-              <View style={styles.gradingBox}>
-                <ActivityIndicator size="large" color="#00FFFF" />
-                <Text style={styles.gradingText}>
-                  🤖 AI ĐANG CHẤM PHẦN {currentPart.partNumber}...
-                </Text>
+              <View style={styles.partPreviewList}>
+                {CEFR_EXAM_PARTS.map((p) => (
+                  <View key={p.partNumber} style={styles.partPreviewItem}>
+                    <Text style={styles.partPreviewTitle}>{p.title}</Text>
+                    <Text style={styles.partPreviewSub}>{p.subtitle}</Text>
+                  </View>
+                ))}
               </View>
-            ) : !isRecording ? (
-              <TouchableOpacity style={styles.recordBtn} onPress={startRecordingPart}>
-                <Text style={styles.recordBtnText}>🔴 BẮT ĐẦU GHI ÂM PHẦN {currentPart.partNumber}</Text>
+
+              <TextInput
+                style={styles.input}
+                placeholder="Họ và tên thí sinh (*)"
+                placeholderTextColor="#64748B"
+                value={studentName}
+                onChangeText={setStudentName}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Mã số sinh viên (VD: 2685014) (*)"
+                placeholderTextColor="#64748B"
+                value={studentCode}
+                onChangeText={setStudentCode}
+              />
+
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleStartExam}>
+                <Text style={styles.primaryBtnText}>🚀 BẮT ĐẦU KIỂM ĐỊNH 3 PHẦN</Text>
               </TouchableOpacity>
-            ) : (
-              <View style={{ alignItems: 'center', gap: 10 }}>
-                <Text style={styles.timerLive}>🔴 ĐANG THU ÂM: {timerSec}s</Text>
-                <View style={styles.micMeterTrack}>
-                  <View
-                    style={[
-                      styles.micMeterFill,
-                      {
-                        width: `${Math.max(4, liveMicLevel)}%`,
-                        backgroundColor: liveMicLevel > 8 ? '#39FF14' : '#FF0055',
-                      },
-                    ]}
-                  />
+            </View>
+          )}
+
+          {step === 'TESTING' && currentPart && (
+            <View style={styles.card}>
+              <View style={styles.progressRow}>
+                <Text style={styles.stepPill}>
+                  PHẦN {currentPart.partNumber} / {CEFR_EXAM_PARTS.length}
+                </Text>
+                <Text style={styles.levelTargetPill}>Mức chuẩn: CEFR {currentPart.targetLevel}</Text>
+              </View>
+
+              <Text style={styles.partHeading}>{currentPart.title}</Text>
+              <Text style={styles.partGuide}>{currentPart.guideVi}</Text>
+
+              <View style={styles.promptBox}>
+                <Text style={styles.promptText}>{currentPart.promptEn}</Text>
+              </View>
+
+              {isGrading ? (
+                <View style={styles.gradingBox}>
+                  <ActivityIndicator size="large" color="#10B981" />
+                  <Text style={styles.gradingText}>
+                    🤖 AI ĐANG PHÂN TÍCH ÂM VỊ IPA & CHẤM PHẦN {currentPart.partNumber}...
+                  </Text>
                 </View>
-                <Text style={styles.micMeterHint}>
-                  {liveMicLevel > 8 ? '🎙️ Đang nhận tín hiệu giọng nói tốt' : '⚠️ Chưa thấy tín hiệu micro — hãy nói gần mic hơn'}
-                </Text>
-                <TouchableOpacity style={styles.stopBtn} onPress={stopAndGradePart}>
-                  <Text style={styles.stopBtnText}>⏹ HOÀN THÀNH & NỘP PHẦN {currentPart.partNumber}</Text>
+              ) : !isRecording ? (
+                <TouchableOpacity style={styles.recordBtn} onPress={startRecordingPart}>
+                  <Text style={styles.recordBtnText}>
+                    🎙️ BẮT ĐẦU GHI ÂM PHẦN {currentPart.partNumber}
+                  </Text>
                 </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        )}
-
-        {step === 'RESULT' && (
-          <View style={[styles.certCard, { borderColor: finalCefr.color }]}>
-            <Text style={styles.certBadge}>🏅 VIPESPEAK ARENA • CHỨNG NHẬN NĂNG LỰC NÓI QUỐC TẾ</Text>
-            <Text style={styles.certStudentName}>{studentName.toUpperCase()}</Text>
-            <Text style={styles.certStudentCode}>MSSV: {studentCode.toUpperCase()}</Text>
-
-            <View style={[styles.cefrLevelBox, { borderColor: finalCefr.color }]}>
-              <Text style={[styles.cefrLevelBig, { color: finalCefr.color }]}>CEFR {finalCefr.level}</Text>
-              <Text style={styles.cefrLevelTitle}>{finalCefr.title}</Text>
-              <Text style={styles.cefrScoreSub}>Điểm tổng hợp: {overallAvg} / 100 điểm</Text>
-            </View>
-
-            <View style={styles.qrRow}>
-              {React.createElement('img', {
-                src: qrImageUrl,
-                alt: 'CEFR Verification QR',
-                style: { width: 105, height: 105, borderRadius: 8, backgroundColor: '#FFF', padding: 4 },
-              })}
-              <View style={{ flex: 1, justifyContent: 'center' }}>
-                <Text style={styles.qrTitle}>🔍 MÃ QR XÁC THỰC CHỨNG NHẬN</Text>
-                <Text style={styles.qrDesc}>
-                  Quét mã QR để kiểm tra tính hợp lệ của chứng nhận CEFR {finalCefr.level} trên hệ thống VipeSpeak Arena.
-                </Text>
-              </View>
-            </View>
-
-            {partResults.map((r) => (
-              <View key={r.part} style={styles.partResultRow}>
-                <Text style={styles.partResultHeader}>
-                  Part {r.part}: <Text style={{ color: '#39FF14' }}>{r.score}đ</Text>
-                </Text>
-                <Text style={styles.partResultTranscript}>🗣️ "{r.transcript}"</Text>
-                <Text style={styles.partResultFeedback}>{r.feedback}</Text>
-              </View>
-            ))}
-
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-              <TouchableOpacity style={[styles.primaryBtn, { flex: 1 }]} onPress={onBack}>
-                <Text style={styles.primaryBtnText}>🏟️ VÀO BẢNG ĐẤU {finalCefr.level}</Text>
-              </TouchableOpacity>
-              {onCompletedNavigateProfile && (
-                <TouchableOpacity
-                  style={[styles.secondaryBtn, { flex: 1 }]}
-                  onPress={() => onCompletedNavigateProfile(studentCode.trim().toUpperCase())}
-                >
-                  <Text style={styles.secondaryBtnText}>👤 XEM HỒ SƠ CÁ NHÂN</Text>
-                </TouchableOpacity>
+              ) : (
+                <View style={{ alignItems: 'center', gap: 12, paddingVertical: 8 }}>
+                  <Text style={styles.timerLive}>🔴 ĐANG THU ÂM: {timerSec}s</Text>
+                  <View style={styles.micMeterTrack}>
+                    <View
+                      style={[
+                        styles.micMeterFill,
+                        {
+                          width: `${Math.max(4, liveMicLevel)}%`,
+                          backgroundColor: liveMicLevel > 8 ? '#10B981' : '#F43F5E',
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.micMeterHint}>
+                    {liveMicLevel > 8
+                      ? '🎙️ Đang nhận tín hiệu giọng nói rõ nét'
+                      : '⚠️ Chưa thấy tín hiệu micro — hãy nói gần mic hơn'}
+                  </Text>
+                  <TouchableOpacity style={styles.stopBtn} onPress={stopAndGradePart}>
+                    <Text style={styles.stopBtnText}>
+                      ⏹ HOÀN THÀNH & NỘP PHẦN {currentPart.partNumber}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
-          </View>
-        )}
-      </ScrollView>
+          )}
+
+          {step === 'RESULT' && (
+            <View style={[styles.certCard, { borderColor: finalCefr.color }]}>
+              <Text style={styles.certBadge}>
+                🏅 VIPESPEAK ARENA • CHỨNG NHẬN NĂNG LỰC NÓI CHUẨN CEFR
+              </Text>
+              <Text style={styles.certStudentName}>{studentName.toUpperCase()}</Text>
+              <Text style={styles.certStudentCode}>
+                SPEAK-{studentCode.trim().toUpperCase()} • MSSV: {studentCode.toUpperCase()}
+              </Text>
+
+              <View style={[styles.cefrLevelBox, { borderColor: `${finalCefr.color}66` }]}>
+                <Text style={[styles.cefrLevelBig, { color: finalCefr.color }]}>
+                  CEFR {finalCefr.level}
+                </Text>
+                <Text style={styles.cefrLevelTitle}>{finalCefr.title}</Text>
+                <Text style={styles.cefrScoreSub}>Điểm tổng hợp: {overallAvg} / 100 điểm</Text>
+              </View>
+
+              <View style={styles.qrRow}>
+                {React.createElement('img', {
+                  src: qrImageUrl,
+                  alt: 'CEFR Verification QR',
+                  style: { width: 100, height: 100, borderRadius: 10, backgroundColor: '#FFF', padding: 4 },
+                })}
+                <View style={{ flex: 1, justifyContent: 'center' }}>
+                  <Text style={styles.qrTitle}>🔍 MÃ QR XÁC THỰC HỘ CHIẾU SPEAK-ID</Text>
+                  <Text style={styles.qrDesc}>
+                    Quét mã QR để kiểm tra tính hợp lệ của chứng nhận CEFR {finalCefr.level} trên hệ sinh thái VipeSpeak Arena.
+                  </Text>
+                </View>
+              </View>
+
+              {partResults.map((r) => (
+                <View key={r.part} style={styles.partResultRow}>
+                  <View style={styles.partResultTop}>
+                    <Text style={styles.partResultHeader}>Part {r.part}</Text>
+                    <Text style={styles.partResultScore}>{r.score} / 100đ</Text>
+                  </View>
+                  <Text style={styles.partResultTranscript}>🗣️ "{r.transcript}"</Text>
+
+                  {r.phonemeAnalysis && (
+                    <View style={styles.ipaInlineBox}>
+                      <Text style={styles.ipaInlineTitle}>
+                        🔬 Âm vị IPA: {Math.round(Number(r.phonemeAnalysis.phonemeAccuracyScore || r.score))}/100
+                      </Text>
+                      {Array.isArray(r.phonemeAnalysis.ipaHighlight) &&
+                        r.phonemeAnalysis.ipaHighlight.length > 0 && (
+                          <Text style={styles.ipaInlineWords}>
+                            Từ cần luyện: {r.phonemeAnalysis.ipaHighlight.join('  •  ')}
+                          </Text>
+                        )}
+                      {r.phonemeAnalysis.stressAndEndingNote ? (
+                        <Text style={styles.ipaInlineNote}>{r.phonemeAnalysis.stressAndEndingNote}</Text>
+                      ) : null}
+                    </View>
+                  )}
+
+                  <Text style={styles.partResultFeedback}>{r.feedback}</Text>
+                </View>
+              ))}
+
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 }}>
+                <TouchableOpacity style={[styles.primaryBtn, { flex: 1, minWidth: 180 }]} onPress={onBack}>
+                  <Text style={styles.primaryBtnText}>🏠 VỀ TRANG CHỦ HỆ SINH THÁI</Text>
+                </TouchableOpacity>
+                {onCompletedNavigateProfile && (
+                  <TouchableOpacity
+                    style={[styles.secondaryBtn, { flex: 1, minWidth: 180 }]}
+                    onPress={() => onCompletedNavigateProfile(studentCode.trim().toUpperCase())}
+                  >
+                    <Text style={styles.secondaryBtnText}>🪪 MỞ HỘ CHIẾU SPEAK-ID</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          )}
+        </ScrollView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#05020D', padding: 16, paddingTop: 40 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  backBtn: { padding: 8, backgroundColor: '#0D0620', borderRadius: 8, borderWidth: 1, borderColor: '#00FFFF' },
-  backText: { color: '#00FFFF', fontSize: 10, fontWeight: 'bold' },
-  headerTitle: { color: '#FFD700', fontSize: 11.5, fontWeight: '900' },
+  container: { flex: 1, backgroundColor: '#0B1120', padding: 16 },
+  innerMax: { maxWidth: 920, width: '100%', alignSelf: 'center', flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+    gap: 8,
+  },
+  backBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  backText: { color: '#CBD5E1', fontSize: 11, fontWeight: '800' },
+  headerTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '900', textAlign: 'center', flex: 1 },
+  badgeTag: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.4)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  badgeTagText: { color: '#6EE7B7', fontSize: 10, fontWeight: '800' },
 
-  errorBanner: { backgroundColor: 'rgba(255,0,85,0.16)', borderWidth: 1, borderColor: '#FF0055', padding: 10, borderRadius: 8, marginBottom: 12 },
-  errorText: { color: '#FF0055', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' },
+  errorBanner: {
+    backgroundColor: 'rgba(244,63,94,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(244,63,94,0.45)',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 14,
+  },
+  errorText: { color: '#FECDD3', fontSize: 12, fontWeight: '700', textAlign: 'center' },
 
-  card: { backgroundColor: '#0D0620', borderRadius: 16, borderWidth: 1.5, borderColor: '#00FFFF', padding: 16, gap: 10 },
-  cardTitle: { color: '#FFD700', fontSize: 14, fontWeight: '900', textAlign: 'center' },
-  cardSub: { color: '#B0B0CC', fontSize: 10.5, textAlign: 'center', lineHeight: 16 },
-  partPreviewList: { gap: 8, marginVertical: 4 },
-  partPreviewItem: { backgroundColor: '#130628', padding: 10, borderRadius: 10, borderLeftWidth: 3, borderLeftColor: '#39FF14' },
-  partPreviewTitle: { color: '#00FFFF', fontSize: 10.5, fontWeight: '900' },
-  partPreviewSub: { color: '#DDD', fontSize: 9.5, marginTop: 2 },
+  card: {
+    backgroundColor: '#111827',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 20,
+    gap: 12,
+  },
+  eyebrow: { color: '#10B981', fontSize: 11, fontWeight: '800', textAlign: 'center' },
+  cardTitle: { color: '#FFFFFF', fontSize: 20, fontWeight: '900', textAlign: 'center' },
+  cardSub: { color: '#94A3B8', fontSize: 12.5, textAlign: 'center', lineHeight: 19 },
+  partPreviewList: { gap: 10, marginVertical: 4 },
+  partPreviewItem: {
+    backgroundColor: '#0B1120',
+    padding: 12,
+    borderRadius: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#10B981',
+  },
+  partPreviewTitle: { color: '#7DD3FC', fontSize: 12, fontWeight: '900' },
+  partPreviewSub: { color: '#CBD5E1', fontSize: 11.5, marginTop: 3 },
 
-  input: { backgroundColor: '#070212', borderWidth: 1, borderColor: '#332255', borderRadius: 8, padding: 10, color: '#FFF', fontSize: 11.5 },
-  primaryBtn: { backgroundColor: '#39FF14', paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
-  primaryBtnText: { color: '#000', fontSize: 11, fontWeight: '900' },
-  secondaryBtn: { backgroundColor: '#1E0B36', paddingVertical: 12, borderRadius: 10, borderWidth: 1.5, borderColor: '#00FFFF', alignItems: 'center' },
-  secondaryBtnText: { color: '#00FFFF', fontSize: 11, fontWeight: '900' },
+  input: {
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    color: '#FFFFFF',
+    fontSize: 13,
+  },
+  primaryBtn: { backgroundColor: '#10B981', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  primaryBtnText: { color: '#020617', fontSize: 13, fontWeight: '900' },
+  secondaryBtn: {
+    backgroundColor: 'rgba(56,189,248,0.12)',
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.4)',
+    alignItems: 'center',
+  },
+  secondaryBtnText: { color: '#7DD3FC', fontSize: 13, fontWeight: '900' },
 
   progressRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  stepPill: { backgroundColor: '#FF007F', color: '#FFF', fontSize: 9.5, fontWeight: '900', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  levelTargetPill: { color: '#39FF14', fontSize: 10, fontWeight: 'bold' },
-  partHeading: { color: '#FFD700', fontSize: 13.5, fontWeight: '900' },
-  partGuide: { color: '#B0B0CC', fontSize: 10.5, fontStyle: 'italic' },
-  promptBox: { backgroundColor: '#130628', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#332255' },
-  promptText: { color: '#FFF', fontSize: 13, fontWeight: 'bold', lineHeight: 20 },
+  stepPill: {
+    backgroundColor: 'rgba(56,189,248,0.16)',
+    color: '#7DD3FC',
+    fontSize: 11,
+    fontWeight: '900',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  levelTargetPill: { color: '#6EE7B7', fontSize: 12, fontWeight: '800' },
+  partHeading: { color: '#FFFFFF', fontSize: 17, fontWeight: '900' },
+  partGuide: { color: '#94A3B8', fontSize: 12.5, lineHeight: 18 },
+  promptBox: {
+    backgroundColor: '#0B1120',
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  promptText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', lineHeight: 24 },
 
-  gradingBox: { alignItems: 'center', paddingVertical: 16, gap: 8 },
-  gradingText: { color: '#00FFFF', fontSize: 11, fontWeight: 'bold' },
-  recordBtn: { backgroundColor: '#FF0055', paddingVertical: 13, borderRadius: 10, alignItems: 'center' },
-  recordBtnText: { color: '#FFF', fontSize: 11.5, fontWeight: '900' },
-  timerLive: { color: '#FF0055', fontSize: 16, fontWeight: '900' },
-  micMeterTrack: { width: 220, height: 8, backgroundColor: '#1A0B33', borderRadius: 99, overflow: 'hidden' },
+  gradingBox: { alignItems: 'center', paddingVertical: 20, gap: 10 },
+  gradingText: { color: '#7DD3FC', fontSize: 13, fontWeight: '800' },
+  recordBtn: { backgroundColor: '#F43F5E', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  recordBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+  timerLive: { color: '#FDA4AF', fontSize: 20, fontWeight: '900' },
+  micMeterTrack: {
+    width: 240,
+    height: 8,
+    backgroundColor: '#0B1120',
+    borderRadius: 99,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
   micMeterFill: { height: '100%', borderRadius: 99 },
-  micMeterHint: { color: '#B0B0CC', fontSize: 10, fontWeight: 'bold' },
-  stopBtn: { backgroundColor: '#39FF14', paddingVertical: 13, paddingHorizontal: 22, borderRadius: 10 },
-  stopBtnText: { color: '#000', fontSize: 11.5, fontWeight: '900' },
+  micMeterHint: { color: '#CBD5E1', fontSize: 11.5, fontWeight: '700' },
+  stopBtn: { backgroundColor: '#10B981', paddingVertical: 14, paddingHorizontal: 24, borderRadius: 12 },
+  stopBtnText: { color: '#020617', fontSize: 13, fontWeight: '900' },
 
-  certCard: { backgroundColor: '#0A0418', borderRadius: 16, borderWidth: 2, padding: 16, gap: 10 },
-  certBadge: { color: '#FFD700', fontSize: 9.5, fontWeight: '900', textAlign: 'center' },
-  certStudentName: { color: '#FFF', fontSize: 16, fontWeight: '900', textAlign: 'center' },
-  certStudentCode: { color: '#8888AA', fontSize: 10.5, textAlign: 'center' },
-  cefrLevelBox: { backgroundColor: '#130628', borderRadius: 12, borderWidth: 1.5, padding: 14, alignItems: 'center' },
-  cefrLevelBig: { fontSize: 28, fontWeight: '900' },
-  cefrLevelTitle: { color: '#FFF', fontSize: 11.5, fontWeight: 'bold', marginTop: 2 },
-  cefrScoreSub: { color: '#AAAABB', fontSize: 10, marginTop: 4 },
+  certCard: {
+    backgroundColor: '#111827',
+    borderRadius: 18,
+    borderWidth: 1.5,
+    padding: 20,
+    gap: 12,
+  },
+  certBadge: { color: '#10B981', fontSize: 11, fontWeight: '900', textAlign: 'center' },
+  certStudentName: { color: '#FFFFFF', fontSize: 20, fontWeight: '900', textAlign: 'center' },
+  certStudentCode: { color: '#94A3B8', fontSize: 12, textAlign: 'center', fontWeight: '700' },
+  cefrLevelBox: {
+    backgroundColor: '#0B1120',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    padding: 16,
+    alignItems: 'center',
+  },
+  cefrLevelBig: { fontSize: 34, fontWeight: '900' },
+  cefrLevelTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '800', marginTop: 4 },
+  cefrScoreSub: { color: '#94A3B8', fontSize: 12, marginTop: 4 },
 
-  qrRow: { flexDirection: 'row', gap: 12, backgroundColor: '#130628', padding: 10, borderRadius: 12, alignItems: 'center' },
-  qrTitle: { color: '#00FFFF', fontSize: 10, fontWeight: '900', marginBottom: 4 },
-  qrDesc: { color: '#CCC', fontSize: 9.5, lineHeight: 14 },
+  qrRow: {
+    flexDirection: 'row',
+    gap: 14,
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    padding: 12,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  qrTitle: { color: '#7DD3FC', fontSize: 12, fontWeight: '900', marginBottom: 4 },
+  qrDesc: { color: '#CBD5E1', fontSize: 11.5, lineHeight: 17 },
 
-  partResultRow: { backgroundColor: '#0D0620', padding: 10, borderRadius: 10, borderWidth: 1, borderColor: '#221144' },
-  partResultHeader: { color: '#FFD700', fontSize: 10.5, fontWeight: '900' },
-  partResultTranscript: { color: '#FFF', fontSize: 10, fontStyle: 'italic', marginTop: 3 },
-  partResultFeedback: { color: '#88FFBB', fontSize: 9.5, marginTop: 3 },
+  partResultRow: {
+    backgroundColor: '#0B1120',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    gap: 6,
+  },
+  partResultTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  partResultHeader: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+  partResultScore: { color: '#10B981', fontSize: 13, fontWeight: '900' },
+  partResultTranscript: { color: '#E2E8F0', fontSize: 12, fontStyle: 'italic' },
+  ipaInlineBox: {
+    backgroundColor: 'rgba(56,189,248,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.3)',
+    borderRadius: 8,
+    padding: 9,
+    gap: 3,
+  },
+  ipaInlineTitle: { color: '#7DD3FC', fontSize: 11, fontWeight: '900' },
+  ipaInlineWords: { color: '#FDE68A', fontSize: 11, fontWeight: '700' },
+  ipaInlineNote: { color: '#CBD5E1', fontSize: 11 },
+  partResultFeedback: { color: '#6EE7B7', fontSize: 11.5, lineHeight: 17 },
 });
