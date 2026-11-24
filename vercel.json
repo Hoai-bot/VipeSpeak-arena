@@ -1,8 +1,7 @@
 {
   "functions": {
-    "api/*.js": {
-      "memory": 1024,
-      "maxDuration": 15
+    "api/**/*.{js,ts}": {
+      "maxDuration": 30
     }
   },
   "routes": [
