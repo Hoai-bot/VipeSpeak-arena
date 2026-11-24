@@ -13,6 +13,14 @@ import {
 import { supabase } from '../../utils/supabase';
 import { ARENA_TRANSLATIONS, AppLang, getBilingualText } from '../i18n/translations';
 
+// 🔧 TÀI KHOẢN NGÂN HÀNG CÔNG TY THỤ HƯỞNG VIETQR CHÍNH THỨC
+const MERCHANT_BANK_CONFIG = {
+  bankId: 'ICB', // VietinBank (eFAST)
+  bankDisplayName: 'VietinBank • CN Lâm Đồng - PGD Phan Đình Phùng',
+  accountNo: '114002975689',
+  accountName: 'CTY TNHH IC DUONG VAO TUONG LAI CUA BAN',
+};
+
 export interface TournamentItem {
   id: string;
   title: { vi: string; en: string };
@@ -54,6 +62,65 @@ export interface LiveMatchItem {
   created_at?: string;
 }
 
+interface PricingPackage {
+  key: 'TRIAL' | 'CLUB' | 'PRO' | 'CENTER';
+  badge: string;
+  nameVi: string;
+  nameEn: string;
+  baseFeeVnd: number;
+  commissionPercent: number;
+  ipaQuotaLabel: string;
+  featuresVi: string[];
+  accentColor: string;
+}
+
+const ARENA_PACKAGES: PricingPackage[] = [
+  {
+    key: 'TRIAL',
+    badge: '🆓 DÙNG THỬ NỘI BỘ',
+    nameVi: 'Gói Lớp Học Thử Nghiệm',
+    nameEn: 'Trial Classroom',
+    baseFeeVnd: 0,
+    commissionPercent: 0,
+    ipaQuotaLabel: '10 lượt AI IPA',
+    featuresVi: ['Mở 1 phòng thi nội bộ', 'Đầy đủ 4 chế độ SOLO/RELAY/ROLEPLAY/DEBATE'],
+    accentColor: '#94A3B8',
+  },
+  {
+    key: 'CLUB',
+    badge: '🥉 GÓI GIẢI LẺ CLUB',
+    nameVi: 'Gói CLB / Sự Kiện Lẻ',
+    nameEn: 'Club Single Event',
+    baseFeeVnd: 199000,
+    commissionPercent: 6,
+    ipaQuotaLabel: 'Tặng 30 lượt IPA',
+    featuresVi: ['Tối đa 50 thí sinh / giải', 'Mở full Phòng Audio VAR Giảng Viên', 'Tự động đối soát lệ phí VietQR'],
+    accentColor: '#38BDF8',
+  },
+  {
+    key: 'PRO',
+    badge: '🥈 GÓI MỞ RỘNG PRO',
+    nameVi: 'Gói Giải Đấu Quy Mô Lớn',
+    nameEn: 'Pro Championship',
+    baseFeeVnd: 399000,
+    commissionPercent: 5,
+    ipaQuotaLabel: 'Tặng 100 lượt IPA',
+    featuresVi: ['Không giới hạn thí sinh', 'Full Audio VAR + Livestream đa sân', 'Lưu trữ toàn bộ Audio Replay'],
+    accentColor: '#A78BFA',
+  },
+  {
+    key: 'CENTER',
+    badge: '🥇 TRUNG TÂM / KHOA THÁNG',
+    nameVi: 'Gói Trung Tâm Anh Ngữ',
+    nameEn: 'Center Monthly SaaS',
+    baseFeeVnd: 790000,
+    commissionPercent: 4,
+    ipaQuotaLabel: 'Tặng 500 lượt IPA/tháng',
+    featuresVi: ['Tổ chức thi & xếp lớp CEFR không giới hạn 30 ngày', 'Cấp chứng nhận QR mang thương hiệu đơn vị'],
+    accentColor: '#10B981',
+  },
+];
+
 interface Props {
   onNavigateCefrTest: () => void;
   onNavigateProfile: () => void;
@@ -87,16 +154,30 @@ export default function ArenaHubScreen({
   const [selectedBillingTourney, setSelectedBillingTourney] = useState<TournamentItem | null>(null);
   const [billingStats, setBillingStats] = useState<{ count: number; gross: number; platformCut: number; net: number } | null>(null);
 
-  // Modal / Form Tạo Giải Đấu & Phòng Thi Trong 3 Phút
+  // Modal / Form Tạo Giải Đấu & Thanh Toán VietQR
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [selectedPkgKey, setSelectedPkgKey] = useState<PricingPackage['key']>('CLUB');
   const [newTitleVi, setNewTitleVi] = useState<string>('');
-  const [newOrganizer, setNewOrganizer] = useState<string>('Khoa Ngoại Ngữ • VipeSpeak Lab');
+  const [newOrganizer, setNewOrganizer] = useState<string>('');
+  const [organizerPhone, setOrganizerPhone] = useState<string>('');
+  const [entryFeeInput, setEntryFeeInput] = useState<string>('0');
   const [newMode, setNewMode] = useState<'SOLO' | 'RELAY' | 'ROLEPLAY' | 'DEBATE'>('SOLO');
   const [newCefr, setNewCefr] = useState<string>('B1');
   const [newVenue, setNewVenue] = useState<'ONLINE' | 'OFFLINE'>('ONLINE');
   const [newDeviceMode, setNewDeviceMode] = useState<'SINGLE_DEVICE' | 'TWO_DEVICES'>('SINGLE_DEVICE');
   const [isCreatingTourney, setIsCreatingTourney] = useState<boolean>(false);
   const [hubStatusMsg, setHubStatusMsg] = useState<string>('');
+
+  // Thông tin hóa đơn VietQR vừa khởi tạo thành công
+  const [createdInvoice, setCreatedInvoice] = useState<{
+    partnerId: string;
+    tourneyTitle: string;
+    pkgName: string;
+    amountVnd: number;
+    transferNote: string;
+    qrUrl: string;
+    commissionPercent: number;
+  } | null>(null);
 
   // State Phòng Thẩm Định Giảng Viên (Audio VAR)
   const [varScoreInputs, setVarScoreInputs] = useState<Record<string, { p1: string; p2: string }>>({});
@@ -153,10 +234,16 @@ export default function ArenaHubScreen({
     }
   };
 
-  // Tạo nhanh giải đấu / phòng thi lớp học trong 3 phút
-  const handleCreateTournament = async () => {
-    if (!newTitleVi.trim()) {
-      setHubStatusMsg(isVi ? '⚠️ Vui lòng nhập tên giải đấu hoặc tên lớp học!' : '⚠️ Please enter tournament/class title!');
+  const selectedPackage = ARENA_PACKAGES.find((p) => p.key === selectedPkgKey) || ARENA_PACKAGES[1];
+
+  // Khởi tạo giải đấu + Sinh mã thanh toán VietQR tự động về tài khoản công ty
+  const handleCreateTournamentWithVietQR = async () => {
+    if (!newTitleVi.trim() || !newOrganizer.trim()) {
+      setHubStatusMsg(
+        isVi
+          ? '⚠️ Vui lòng nhập Tên giải đấu và Tên Đơn vị tổ chức / CLB!'
+          : '⚠️ Please enter Tournament Title and Organizer Name!'
+      );
       return;
     }
     if (!supabase) return;
@@ -165,25 +252,31 @@ export default function ArenaHubScreen({
     setHubStatusMsg('');
     try {
       const cleanTitle = newTitleVi.trim();
+      const partnerCode = `VS-${Math.floor(100000 + Math.random() * 900000)}`;
+      const studentEntryFee = Math.max(0, Math.round(Number(entryFeeInput || 0)));
+      const organizerLabel = organizerPhone.trim()
+        ? `${newOrganizer.trim()} (${organizerPhone.trim()})`
+        : newOrganizer.trim();
+
       const { data: created, error } = await supabase
         .from('tournaments')
         .insert([
           {
             title: { vi: cleanTitle, en: `${cleanTitle} (${newMode} • ${newCefr})` },
             description: {
-              vi: `Đấu trường thực hành nói chuẩn CEFR ${newCefr} thể thức ${newMode} — Tự động kiểm định âm vị IPA & Audio VAR.`,
-              en: `CEFR ${newCefr} ${newMode} speaking competition with automated Gemini IPA audit & Audio VAR.`,
+              vi: `Giải đấu & Khảo thí nói chuẩn CEFR ${newCefr} (${newMode}) • Gói ${selectedPackage.nameVi} • Mã BTC: ${partnerCode}`,
+              en: `CEFR ${newCefr} ${newMode} speaking arena • ${selectedPackage.nameEn} • Partner ID: ${partnerCode}`,
             },
             mode: newMode,
             cefr_level: newCefr,
             venue_type: newVenue,
             device_mode: newDeviceMode,
-            status: 'LIVE',
-            organizer_name: newOrganizer.trim() || 'VipeSpeak Academic Hub',
+            status: selectedPackage.baseFeeVnd === 0 ? 'LIVE' : 'UPCOMING',
+            organizer_name: organizerLabel,
             currency: 'VND',
-            platform_fee: 0,
-            entry_fee_per_student: 0,
-            platform_commission_percent: 0,
+            platform_fee: selectedPackage.baseFeeVnd,
+            entry_fee_per_student: studentEntryFee,
+            platform_commission_percent: selectedPackage.commissionPercent,
             start_at: new Date().toISOString(),
           },
         ])
@@ -195,8 +288,31 @@ export default function ArenaHubScreen({
       if (created) {
         setTournaments((prev) => [created as TournamentItem, ...prev]);
         setShowCreateModal(false);
+
+        if (selectedPackage.baseFeeVnd > 0) {
+          const transferNote = `VS ${selectedPackage.key} ${partnerCode.replace('VS-', '')}`;
+          const vietQrImg = `https://img.vietqr.io/image/${MERCHANT_BANK_CONFIG.bankId}-${MERCHANT_BANK_CONFIG.accountNo}-compact2.png?amount=${selectedPackage.baseFeeVnd}&addInfo=${encodeURIComponent(
+            transferNote
+          )}&accountName=${encodeURIComponent(MERCHANT_BANK_CONFIG.accountName)}`;
+
+          setCreatedInvoice({
+            partnerId: partnerCode,
+            tourneyTitle: cleanTitle,
+            pkgName: selectedPackage.nameVi,
+            amountVnd: selectedPackage.baseFeeVnd,
+            transferNote,
+            qrUrl: vietQrImg,
+            commissionPercent: selectedPackage.commissionPercent,
+          });
+        } else {
+          setHubStatusMsg(
+            isVi
+              ? `✅ Đã kích hoạt miễn phí "${cleanTitle}" (Mã BTC: ${partnerCode})!`
+              : `✅ Activated trial arena "${cleanTitle}" (${partnerCode})!`
+          );
+        }
+
         setNewTitleVi('');
-        setHubStatusMsg(isVi ? '✅ Đã khởi tạo giải đấu & phòng thi thành công!' : '✅ Tournament & Arena room created!');
       }
     } catch (err: any) {
       setHubStatusMsg(`❌ ${err?.message || 'Lỗi tạo giải đấu'}`);
@@ -335,12 +451,15 @@ export default function ArenaHubScreen({
             <View style={styles.heroBtnRow}>
               <TouchableOpacity
                 style={styles.primaryCtaBtn}
-                onPress={() => setShowCreateModal((v) => !v)}
+                onPress={() => {
+                  setCreatedInvoice(null);
+                  setShowCreateModal((v) => !v);
+                }}
               >
                 <Text style={styles.primaryCtaText}>
                   {showCreateModal
                     ? isVi
-                      ? '✕ ĐÓNG TRÌNH TẠO GIẢI ĐẤU'
+                      ? '✕ ĐÓNG CỔNG MỞ GIẢI'
                       : '✕ CLOSE BUILDER'
                     : isVi
                     ? '➕ MỞ GIẢI ĐẤU / PHÒNG THI (3 PHÚT)'
@@ -354,96 +473,238 @@ export default function ArenaHubScreen({
             </View>
           </View>
 
-          {/* FORM KHỞI TẠO GIẢI ĐẤU / LỚP HỌC TRONG 3 PHÚT */}
+          {/* =================================================================
+              HÓA ĐƠN THANH TOÁN VIETQR TỰ ĐỘNG VỀ TÀI KHOẢN CÔNG TY
+             ================================================================= */}
+          {createdInvoice && (
+            <View style={styles.invoiceCard}>
+              <View style={styles.invoiceHeader}>
+                <View>
+                  <Text style={styles.invoiceEyebrow}>✅ VIETQR AUTO-SYNC • KÍCH HOẠT GIẢI ĐẤU</Text>
+                  <Text style={styles.invoiceTitle}>{createdInvoice.tourneyTitle}</Text>
+                </View>
+                <TouchableOpacity onPress={() => setCreatedInvoice(null)}>
+                  <Text style={styles.closeX}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.invoiceBody}>
+                {Platform.OS === 'web' && (
+                  // @ts-ignore
+                  <img
+                    src={createdInvoice.qrUrl}
+                    alt="VietQR Payment"
+                    style={{
+                      width: 175,
+                      height: 175,
+                      borderRadius: 12,
+                      backgroundColor: '#FFFFFF',
+                      padding: 6,
+                    }}
+                  />
+                )}
+
+                <View style={{ flex: 1, minWidth: 240, gap: 6 }}>
+                  <Text style={styles.invoiceLine}>
+                    🔑 <Text style={styles.boldWhite}>Mã Đơn Vị (Partner ID):</Text> {createdInvoice.partnerId}
+                  </Text>
+                  <Text style={styles.invoiceLine}>
+                    💎 <Text style={styles.boldWhite}>Gói dịch vụ:</Text> {createdInvoice.pkgName} (+{createdInvoice.commissionPercent}% phí vé)
+                  </Text>
+                  <Text style={styles.invoiceLine}>
+                    💰 <Text style={styles.boldWhite}>Số tiền thanh toán:</Text>{' '}
+                    <Text style={{ color: '#10B981', fontWeight: '900', fontSize: 15 }}>
+                      {createdInvoice.amountVnd.toLocaleString()}đ
+                    </Text>
+                  </Text>
+                  <Text style={styles.invoiceLine}>
+                    🏢 <Text style={styles.boldWhite}>Đơn vị thụ hưởng:</Text> {MERCHANT_BANK_CONFIG.accountName}
+                  </Text>
+                  <Text style={styles.invoiceLine}>
+                    🏦 <Text style={styles.boldWhite}>Ngân hàng:</Text> {MERCHANT_BANK_CONFIG.bankDisplayName} • STK:{' '}
+                    <Text style={{ color: '#7DD3FC', fontWeight: '900' }}>{MERCHANT_BANK_CONFIG.accountNo}</Text>
+                  </Text>
+                  <Text style={styles.invoiceLine}>
+                    📝 <Text style={styles.boldWhite}>Nội dung CK:</Text>{' '}
+                    <Text style={{ color: '#FCD34D', fontWeight: '900' }}>{createdInvoice.transferNote}</Text>
+                  </Text>
+                  <Text style={styles.invoiceHint}>
+                    Quét mã VietQR bằng App Ngân hàng bất kỳ. Hệ thống tự động đối soát và mở trạng thái LIVE ngay sau khi nhận thanh toán.
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* =================================================================
+              FORM KHỞI TẠO GIẢI ĐẤU & BẢNG CHỌN GÓI VẬN HÀNH (CLUB / PRO / CENTER)
+             ================================================================= */}
           {showCreateModal && (
             <View style={styles.builderCard}>
               <Text style={styles.builderTitle}>
-                🚀 {isVi ? 'KHỞI TẠO GIẢI ĐẤU / PHÒNG THI LỚP HỌC MỚI' : 'LAUNCH NEW TOURNAMENT / CLASS ROOM'}
+                💎 {isVi ? 'CHỌN GÓI VẬN HÀNH & KHỞI TẠO GIẢI ĐẤU' : 'SELECT PACKAGE & LAUNCH ARENA'}
               </Text>
               <Text style={styles.builderSub}>
                 {isVi
-                  ? 'Hệ thống tự động cấp sân khấu thi đấu, bộ đếm chống chuyển tab và chấm âm vị IPA'
-                  : 'Automatically configures arena stage, tab-switch guard, and Gemini IPA scoring'}
+                  ? 'Tích hợp trọn bộ AI Kiểm định IPA + Phòng Audio VAR Giảng Viên + Đối soát VietQR tự động'
+                  : 'Includes Gemini IPA Audit + Teacher Audio VAR + Automated VietQR Billing'}
               </Text>
+
+              {/* 4 Thẻ Gói Cước */}
+              <View style={styles.pkgGrid}>
+                {ARENA_PACKAGES.map((pkg) => {
+                  const isSelected = pkg.key === selectedPkgKey;
+                  return (
+                    <TouchableOpacity
+                      key={pkg.key}
+                      style={[
+                        styles.pkgCard,
+                        { borderColor: isSelected ? pkg.accentColor : 'rgba(255,255,255,0.1)' },
+                        isSelected && { backgroundColor: 'rgba(16,185,129,0.08)' },
+                      ]}
+                      onPress={() => setSelectedPkgKey(pkg.key)}
+                    >
+                      <Text style={[styles.pkgBadge, { color: pkg.accentColor }]}>{pkg.badge}</Text>
+                      <Text style={styles.pkgPrice}>
+                        {pkg.baseFeeVnd === 0
+                          ? '0đ (Miễn phí)'
+                          : pkg.key === 'CENTER'
+                          ? `${pkg.baseFeeVnd.toLocaleString()}đ/tháng`
+                          : `${pkg.baseFeeVnd.toLocaleString()}đ/giải`}
+                      </Text>
+                      <Text style={styles.pkgComm}>
+                        {pkg.commissionPercent > 0
+                          ? `+ ${pkg.commissionPercent}% phí lệ phí vé`
+                          : 'Không thu phí giao dịch'}
+                      </Text>
+                      <Text style={styles.pkgQuota}>⚡ {pkg.ipaQuotaLabel}</Text>
+                      {pkg.featuresVi.map((f, i) => (
+                        <Text key={i} style={styles.pkgFeat}>
+                          • {f}
+                        </Text>
+                      ))}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
 
               <TextInput
                 style={styles.input}
-                placeholder={isVi ? 'Tên giải đấu / Lớp học (VD: Đấu Trường Tiếng Anh B1 - K4)...' : 'Tournament or Class Name...'}
+                placeholder={
+                  isVi
+                    ? 'Tên giải đấu / Kỳ thi (VD: VipeSpeak Open Championship 2026) (*)'
+                    : 'Tournament or Exam Title (*)'
+                }
                 placeholderTextColor="#64748B"
                 value={newTitleVi}
                 onChangeText={setNewTitleVi}
               />
 
-              <TextInput
-                style={styles.input}
-                placeholder={isVi ? 'Đơn vị tổ chức / Giảng viên phụ trách' : 'Organizer / Instructor Name'}
-                placeholderTextColor="#64748B"
-                value={newOrganizer}
-                onChangeText={setNewOrganizer}
-              />
-
-              <Text style={styles.fieldLabel}>{isVi ? 'Chọn thể thức thi đấu:' : 'Competition Mode:'}</Text>
-              <View style={styles.filterRow}>
-                {(['SOLO', 'RELAY', 'ROLEPLAY', 'DEBATE'] as const).map((m) => (
-                  <TouchableOpacity
-                    key={m}
-                    style={[styles.chip, newMode === m && styles.chipActive]}
-                    onPress={() => setNewMode(m)}
-                  >
-                    <Text style={[styles.chipText, newMode === m && styles.chipTextActive]}>{m}</Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={styles.twoColRow}>
+                <TextInput
+                  style={[styles.input, { flex: 1, minWidth: 220 }]}
+                  placeholder={isVi ? 'Tên CLB / Trung tâm / Khoa tổ chức (*)' : 'Organizer / Center Name (*)'}
+                  placeholderTextColor="#64748B"
+                  value={newOrganizer}
+                  onChangeText={setNewOrganizer}
+                />
+                <TextInput
+                  style={[styles.input, { flex: 1, minWidth: 200 }]}
+                  placeholder={isVi ? 'Số điện thoại / Zalo nhận mã BTC' : 'Organizer Phone / Zalo'}
+                  placeholderTextColor="#64748B"
+                  value={organizerPhone}
+                  onChangeText={setOrganizerPhone}
+                />
               </View>
 
-              <Text style={styles.fieldLabel}>{isVi ? 'Cấp độ CEFR mục tiêu:' : 'Target CEFR:'}</Text>
-              <View style={styles.filterRow}>
-                {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((lvl) => (
-                  <TouchableOpacity
-                    key={lvl}
-                    style={[styles.chipSmall, newCefr === lvl && styles.chipActive]}
-                    onPress={() => setNewCefr(lvl)}
-                  >
-                    <Text style={[styles.chipText, newCefr === lvl && styles.chipTextActive]}>{lvl}</Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={styles.twoColRow}>
+                <View style={{ flex: 1, minWidth: 220 }}>
+                  <Text style={styles.fieldLabel}>
+                    {isVi ? 'Lệ phí thu mỗi thí sinh (VNĐ - nhập 0 nếu miễn phí):' : 'Entry Fee per Student (VND):'}
+                  </Text>
+                  <TextInput
+                    style={styles.input}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor="#64748B"
+                    value={entryFeeInput}
+                    onChangeText={setEntryFeeInput}
+                  />
+                </View>
+
+                <View style={{ flex: 1, minWidth: 220 }}>
+                  <Text style={styles.fieldLabel}>{isVi ? 'Thể thức thi đấu:' : 'Arena Mode:'}</Text>
+                  <View style={styles.filterRow}>
+                    {(['SOLO', 'RELAY', 'ROLEPLAY', 'DEBATE'] as const).map((m) => (
+                      <TouchableOpacity
+                        key={m}
+                        style={[styles.chip, newMode === m && styles.chipActive]}
+                        onPress={() => setNewMode(m)}
+                      >
+                        <Text style={[styles.chipText, newMode === m && styles.chipTextActive]}>{m}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
               </View>
 
-              <View style={styles.filterRow}>
-                {(['ONLINE', 'OFFLINE'] as const).map((v) => (
-                  <TouchableOpacity
-                    key={v}
-                    style={[styles.chip, newVenue === v && styles.chipActiveSky]}
-                    onPress={() => setNewVenue(v)}
-                  >
-                    <Text style={[styles.chipText, newVenue === v && styles.chipTextActive]}>
-                      {v === 'ONLINE' ? '🌐 ONLINE' : '🏟️ OFFLINE'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={styles.twoColRow}>
+                <View style={{ flex: 1, minWidth: 220 }}>
+                  <Text style={styles.fieldLabel}>{isVi ? 'Cấp độ CEFR:' : 'Target CEFR:'}</Text>
+                  <View style={styles.filterRow}>
+                    {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((lvl) => (
+                      <TouchableOpacity
+                        key={lvl}
+                        style={[styles.chipSmall, newCefr === lvl && styles.chipActive]}
+                        onPress={() => setNewCefr(lvl)}
+                      >
+                        <Text style={[styles.chipText, newCefr === lvl && styles.chipTextActive]}>{lvl}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
 
-                {(['SINGLE_DEVICE', 'TWO_DEVICES'] as const).map((d) => (
-                  <TouchableOpacity
-                    key={d}
-                    style={[styles.chip, newDeviceMode === d && styles.chipActiveSky]}
-                    onPress={() => setNewDeviceMode(d)}
-                  >
-                    <Text style={[styles.chipText, newDeviceMode === d && styles.chipTextActive]}>
-                      {d === 'SINGLE_DEVICE' ? '📱 Chung 1 máy' : '💻 2 thiết bị từ xa'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                <View style={{ flex: 1, minWidth: 220 }}>
+                  <Text style={styles.fieldLabel}>{isVi ? 'Hình thức & Thiết bị:' : 'Venue & Devices:'}</Text>
+                  <View style={styles.filterRow}>
+                    {(['ONLINE', 'OFFLINE'] as const).map((v) => (
+                      <TouchableOpacity
+                        key={v}
+                        style={[styles.chip, newVenue === v && styles.chipActiveSky]}
+                        onPress={() => setNewVenue(v)}
+                      >
+                        <Text style={[styles.chipText, newVenue === v && styles.chipTextActive]}>
+                          {v === 'ONLINE' ? '🌐 ONLINE' : '🏟️ OFFLINE'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                    {(['SINGLE_DEVICE', 'TWO_DEVICES'] as const).map((d) => (
+                      <TouchableOpacity
+                        key={d}
+                        style={[styles.chip, newDeviceMode === d && styles.chipActiveSky]}
+                        onPress={() => setNewDeviceMode(d)}
+                      >
+                        <Text style={[styles.chipText, newDeviceMode === d && styles.chipTextActive]}>
+                          {d === 'SINGLE_DEVICE' ? '📱 1 máy' : '💻 2 máy'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
               </View>
 
               <TouchableOpacity
                 style={styles.primaryCtaBtn}
                 disabled={isCreatingTourney}
-                onPress={handleCreateTournament}
+                onPress={handleCreateTournamentWithVietQR}
               >
                 {isCreatingTourney ? (
                   <ActivityIndicator color="#020617" />
                 ) : (
                   <Text style={styles.primaryCtaText}>
-                    ✅ {isVi ? 'XUẤT BẢN GIẢI ĐẤU NGAY' : 'PUBLISH ARENA NOW'}
+                    {selectedPackage.baseFeeVnd > 0
+                      ? `💳 TẠO GIẢI & LẤY MÃ VIETQR (${selectedPackage.baseFeeVnd.toLocaleString()}đ)`
+                      : '✅ KÍCH HOẠT PHÒNG THI MIỄN PHÍ NGAY'}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -476,7 +737,6 @@ export default function ArenaHubScreen({
              ================================================================= */}
           {hubTab === 'TOURNAMENTS' && (
             <>
-              {/* KHU VỰC CÁC TRẬN ĐANG LIVESTREAM TRỰC TIẾP */}
               {liveMatches.length > 0 && (
                 <View style={styles.liveSection}>
                   <Text style={styles.sectionTitle}>🔴 {t.live_badge} ({liveMatches.length})</Text>
@@ -570,8 +830,8 @@ export default function ArenaHubScreen({
                       </View>
                       <Text style={styles.feeBadge}>
                         {tourney.entry_fee_per_student > 0
-                          ? `${tourney.entry_fee_per_student.toLocaleString()} ${tourney.currency}`
-                          : 'FREE ACCESS'}
+                          ? `Vé: ${tourney.entry_fee_per_student.toLocaleString()} ${tourney.currency}`
+                          : 'FREE ENTRY'}
                       </Text>
                     </View>
 
@@ -714,7 +974,6 @@ export default function ArenaHubScreen({
                         {m.player2_name ? `  🆚  ${m.player2_name} (${m.player2_code || 'P2'})` : ''}
                       </Text>
 
-                      {/* Trình phát Audio P1 & P2 */}
                       <View style={styles.varAudioGrid}>
                         <View style={styles.varPlayerBox}>
                           <Text style={styles.varPlayerLabel}>
@@ -866,7 +1125,7 @@ const styles = StyleSheet.create({
   heroBtnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   primaryCtaBtn: {
     flex: 1,
-    minWidth: 210,
+    minWidth: 220,
     backgroundColor: '#10B981',
     paddingVertical: 13,
     paddingHorizontal: 16,
@@ -887,18 +1146,53 @@ const styles = StyleSheet.create({
   },
   secondaryCtaText: { color: '#7DD3FC', fontSize: 12.5, fontWeight: '800' },
 
-  builderCard: {
+  invoiceCard: {
     backgroundColor: '#111827',
     borderRadius: 16,
     borderWidth: 1.5,
     borderColor: '#10B981',
     padding: 18,
     marginBottom: 18,
-    gap: 10,
+    gap: 12,
   },
-  builderTitle: { color: '#6EE7B7', fontSize: 15, fontWeight: '900' },
-  builderSub: { color: '#94A3B8', fontSize: 12, marginBottom: 4 },
-  fieldLabel: { color: '#CBD5E1', fontSize: 11.5, fontWeight: '700', marginTop: 2 },
+  invoiceHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  invoiceEyebrow: { color: '#10B981', fontSize: 11, fontWeight: '900' },
+  invoiceTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '900', marginTop: 2 },
+  closeX: { color: '#F87171', fontSize: 18, fontWeight: '900', paddingHorizontal: 6 },
+  invoiceBody: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, alignItems: 'center' },
+  invoiceLine: { color: '#CBD5E1', fontSize: 12.5, lineHeight: 19 },
+  boldWhite: { color: '#FFFFFF', fontWeight: '800' },
+  invoiceHint: { color: '#94A3B8', fontSize: 11.5, fontStyle: 'italic', marginTop: 4 },
+
+  builderCard: {
+    backgroundColor: '#111827',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#38BDF8',
+    padding: 18,
+    marginBottom: 18,
+    gap: 12,
+  },
+  builderTitle: { color: '#7DD3FC', fontSize: 16, fontWeight: '900' },
+  builderSub: { color: '#94A3B8', fontSize: 12 },
+  pkgGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  pkgCard: {
+    flexGrow: 1,
+    flexBasis: 230,
+    backgroundColor: '#0B1120',
+    borderWidth: 1.5,
+    borderRadius: 12,
+    padding: 12,
+    gap: 4,
+  },
+  pkgBadge: { fontSize: 11, fontWeight: '900' },
+  pkgPrice: { color: '#FFFFFF', fontSize: 16, fontWeight: '900', marginTop: 2 },
+  pkgComm: { color: '#FCD34D', fontSize: 11, fontWeight: '700' },
+  pkgQuota: { color: '#6EE7B7', fontSize: 11, fontWeight: '800', marginBottom: 4 },
+  pkgFeat: { color: '#CBD5E1', fontSize: 11, lineHeight: 16 },
+
+  twoColRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  fieldLabel: { color: '#CBD5E1', fontSize: 11.5, fontWeight: '700', marginBottom: 5 },
   input: {
     backgroundColor: '#0B1120',
     borderWidth: 1,
