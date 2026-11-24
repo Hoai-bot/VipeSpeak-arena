@@ -433,28 +433,41 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
     }
   };
 
-  // Giảng viên / BTC duyệt ảnh từ gallery/pending sang gallery/approved (làm sạch tên tệp chứa %)
+  // Giảng viên / BTC duyệt ảnh: tải blob từ URL hiện tại -> upload sang gallery/approved -> dọn pending
   const handleApprovePhoto = async (photo: ArenaPhotoItem) => {
-    if (!supabase || !photo.storagePath) return;
-    setModeratingPath(photo.storagePath);
+    if (!supabase) return;
+    const itemKey = photo.storagePath || photo.id;
+    setModeratingPath(itemKey);
     try {
       const safeCode = toSafeStorageSlug(photo.studentCode, 20);
       const safeName = toSafeStorageSlug(photo.uploaderName, 36);
       const safeCap = toSafeStorageSlug(photo.caption, 50);
       const newPath = `gallery/approved/${Date.now()}__${safeCode}__${safeName}__${safeCap}.jpg`;
 
-      const { error } = await supabase.storage.from('submissions').move(photo.storagePath, newPath);
-      if (error) throw error;
+      const imgRes = await fetch(photo.imageUrl);
+      if (!imgRes.ok) throw new Error('Không đọc được dữ liệu ảnh gốc');
+      const imgBlob = await imgRes.blob();
+
+      const { error: upErr } = await supabase.storage.from('submissions').upload(newPath, imgBlob, {
+        contentType: 'image/jpeg',
+        upsert: true,
+      });
+      if (upErr) throw upErr;
+
+      if (photo.storagePath) {
+        await supabase.storage.from('submissions').remove([photo.storagePath]);
+      }
 
       const { data: urlObj } = supabase.storage.from('submissions').getPublicUrl(newPath);
       const approvedItem: ArenaPhotoItem = {
         ...photo,
+        id: newPath,
         storagePath: newPath,
         status: 'APPROVED',
         imageUrl: urlObj?.publicUrl || photo.imageUrl,
       };
 
-      setPendingPhotos((prev) => prev.filter((p) => p.storagePath !== photo.storagePath));
+      setPendingPhotos((prev) => prev.filter((p) => (p.storagePath || p.id) !== itemKey));
       setApprovedPhotos((prev) => [approvedItem, ...prev]);
       setStudioNotice(`✅ Đã duyệt hiển thị công khai ảnh của ${photo.uploaderName}!`);
     } catch (err: any) {
@@ -466,14 +479,16 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
 
   // Giảng viên / BTC xóa ảnh vi phạm hoặc spam
   const handleRejectDeletePhoto = async (photo: ArenaPhotoItem) => {
-    if (!supabase || !photo.storagePath) return;
-    setModeratingPath(photo.storagePath);
+    if (!supabase) return;
+    const itemKey = photo.storagePath || photo.id;
+    setModeratingPath(itemKey);
     try {
-      const { error } = await supabase.storage.from('submissions').remove([photo.storagePath]);
-      if (error) throw error;
+      if (photo.storagePath) {
+        await supabase.storage.from('submissions').remove([photo.storagePath]);
+      }
 
-      setPendingPhotos((prev) => prev.filter((p) => p.storagePath !== photo.storagePath));
-      setApprovedPhotos((prev) => prev.filter((p) => p.storagePath !== photo.storagePath));
+      setPendingPhotos((prev) => prev.filter((p) => (p.storagePath || p.id) !== itemKey));
+      setApprovedPhotos((prev) => prev.filter((p) => (p.storagePath || p.id) !== itemKey));
       setStudioNotice('🗑️ Đã xóa ảnh khỏi hệ thống!');
     } catch (err: any) {
       setStudioNotice(`❌ Lỗi xóa ảnh: ${err?.message || 'Thử lại'}`);
@@ -730,42 +745,45 @@ export default function EventsGalleryScreen({ onBack, onEnterTournamentStage }: 
                     <Text style={styles.pendingEmpty}>Không có ảnh nào đang chờ duyệt.</Text>
                   ) : (
                     <View style={styles.photoGrid}>
-                      {pendingPhotos.map((p) => (
-                        <View key={p.id} style={styles.pendingCard}>
-                          {Platform.OS === 'web' && (
-                            // @ts-ignore
-                            <img
-                              src={p.imageUrl}
-                              alt={p.caption}
-                              style={{ width: '100%', height: 135, objectFit: 'cover' }}
-                            />
-                          )}
-                          <View style={{ padding: 10, gap: 6 }}>
-                            <Text style={styles.photoUploader}>
-                              🪪 {p.uploaderName} ({p.studentCode})
-                            </Text>
-                            <Text style={styles.photoCaption} numberOfLines={2}>
-                              {p.caption}
-                            </Text>
-                            <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-                              <TouchableOpacity
-                                style={styles.approveBtn}
-                                disabled={moderatingPath === p.storagePath}
-                                onPress={() => handleApprovePhoto(p)}
-                              >
-                                <Text style={styles.approveBtnText}>✅ Duyệt</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                style={styles.rejectBtn}
-                                disabled={moderatingPath === p.storagePath}
-                                onPress={() => handleRejectDeletePhoto(p)}
-                              >
-                                <Text style={styles.rejectBtnText}>🗑️ Xóa</Text>
-                              </TouchableOpacity>
+                      {pendingPhotos.map((p) => {
+                        const itemKey = p.storagePath || p.id;
+                        return (
+                          <View key={itemKey} style={styles.pendingCard}>
+                            {Platform.OS === 'web' && (
+                              // @ts-ignore
+                              <img
+                                src={p.imageUrl}
+                                alt={p.caption}
+                                style={{ width: '100%', height: 135, objectFit: 'cover' }}
+                              />
+                            )}
+                            <View style={{ padding: 10, gap: 6 }}>
+                              <Text style={styles.photoUploader}>
+                                🪪 {p.uploaderName} ({p.studentCode})
+                              </Text>
+                              <Text style={styles.photoCaption} numberOfLines={2}>
+                                {p.caption}
+                              </Text>
+                              <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                                <TouchableOpacity
+                                  style={styles.approveBtn}
+                                  disabled={moderatingPath === itemKey}
+                                  onPress={() => handleApprovePhoto(p)}
+                                >
+                                  <Text style={styles.approveBtnText}>✅ Duyệt</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={styles.rejectBtn}
+                                  disabled={moderatingPath === itemKey}
+                                  onPress={() => handleRejectDeletePhoto(p)}
+                                >
+                                  <Text style={styles.rejectBtnText}>🗑️ Xóa</Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
                           </View>
-                        </View>
-                      ))}
+                        );
+                      })}
                     </View>
                   )}
                 </View>
